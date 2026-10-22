@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Little Game — 별 잡기</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #101628; color: #f4f6ff; }
+    main { width: min(92vw, 560px); text-align: center; }
+    h1 { margin-bottom: .25rem; }
+    p { color: #b8c2db; }
+    .stats { display: flex; justify-content: space-around; margin: 1.25rem 0; font-size: 1.2rem; }
+    #field { position: relative; height: 340px; overflow: hidden; border: 2px solid #45557d; border-radius: 18px; background: radial-gradient(circle at top, #263758, #17213b); }
+    #star { position: absolute; display: none; width: 56px; height: 56px; border: 0; border-radius: 50%; background: #ffcf5a; color: #2b230d; font-size: 29px; cursor: pointer; box-shadow: 0 0 25px #ffcf5a66; touch-action: manipulation; }
+    #start { margin-top: 18px; padding: 12px 26px; border: 0; border-radius: 12px; background: #85b6ff; color: #101628; font-size: 1rem; font-weight: 700; cursor: pointer; }
+    #message { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; font-size: 1.2rem; pointer-events: none; }
+    button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>⭐ 별 잡기</h1>
+    <p>20초 동안 나타나는 별을 최대한 많이 눌러보세요!</p>
+    <div class="stats">
+      <span>점수: <strong id="score">0</strong></span>
+      <span>남은 시간: <strong id="time">20</strong>초</span>
+    </div>
+    <div id="field">
+      <button id="star" aria-label="별 잡기">★</button>
+      <div id="message">시작 버튼을 눌러주세요</div>
+    </div>
+    <button id="start">게임 시작</button>
+  </main>
+  <script>
+    const field = document.querySelector('#field');
+    const star = document.querySelector('#star');
+    const message = document.querySelector('#message');
+    const start = document.querySelector('#start');
+    const scoreLabel = document.querySelector('#score');
+    const timeLabel = document.querySelector('#time');
+    let score = 0;
+    let time = 20;
+    let timer = null;
+
+    function moveStar() {
+      const x = Math.random() * Math.max(0, field.clientWidth - star.offsetWidth);
+      const y = Math.random() * Math.max(0, field.clientHeight - star.offsetHeight);
+      star.style.left = x + 'px';
+      star.style.top = y + 'px';
+    }
+
+    function finish() {
+      clearInterval(timer);
+      timer = null;
+      star.style.display = 'none';
+      message.textContent = '게임 종료! 최종 점수: ' + score;
+      message.style.display = 'grid';
+      start.textContent = '다시 하기';
+      start.disabled = false;
+    }
+
+    start.addEventListener('click', () => {
+      if (timer) return;
+      score = 0;
+      time = 20;
+      scoreLabel.textContent = score;
+      timeLabel.textContent = time;
+      message.style.display = 'none';
+      star.style.display = 'block';
+      start.disabled = true;
+      moveStar();
+      timer = setInterval(() => {
+        time -= 1;
+        timeLabel.textContent = time;
+        if (time <= 0) finish();
+      }, 1000);
+    });
+
+    star.addEventListener('click', () => {
+      if (!timer) return;
+      scoreLabel.textContent = ++score;
+      moveStar();
+    });
+  </script>
+</body>
+</html>
