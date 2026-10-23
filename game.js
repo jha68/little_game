@@ -323,7 +323,8 @@
       const spec = motionFrames[pose.name];
       const index = reduced.matches
         ? 0
-        : Math.floor((now - pose.start) / spec.interval) % spec.frames.length;
+        : Math.floor(Math.max(0, now - pose.start) / spec.interval) %
+          spec.frames.length;
       setPoseFrame(el, spec.frames[index]);
     }
     if (poses.size && !reduced.matches)

@@ -4,6 +4,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
 import re
+import traceback
 from pathlib import Path
 from threading import Thread
 
@@ -12,6 +13,8 @@ from playwright.sync_api import expect, sync_playwright
 
 OBJECTS = ('controller', 'tea', 'cat', 'mushroom', 'stars')
 MOTIONS = {'controller': 'game', 'tea': 'tea', 'cat': 'pet', 'mushroom': 'sit', 'stars': 'light'}
+CURRENT_CASE = 'startup'
+CURRENT_STEP = 'initialization'
 VIEWPORTS = (
     (320, 568),
     (390, 844),
@@ -20,6 +23,32 @@ VIEWPORTS = (
     (768, 900),
     (1024, 1366),
 )
+
+
+def step(name):
+    global CURRENT_STEP
+    CURRENT_STEP = name
+    print(f'CHECK {CURRENT_CASE}: {name}', flush=True)
+
+
+def annotate_failure():
+    # GitHub renders these annotations in the public run summary even when
+    # detailed job logs are unavailable. Never swallow the original exception.
+    message = f'{CURRENT_CASE} / {CURRENT_STEP}\n{traceback.format_exc()}'
+    escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(f'::error file=scripts/smoke_test.py,title=Browser smoke test failed::{escaped}', flush=True)
+
+
+def prepare_page(context, errors, cpu_throttle):
+    page = context.new_page()
+    page.set_default_timeout(10_000)
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('requestfailed', lambda request: errors.append(request.url))
+    page.on('response', lambda response: errors.append(f'{response.status} {response.url}') if response.status >= 400 else None)
+    if cpu_throttle > 1:
+        session = context.new_cdp_session(page)
+        session.send('Emulation.setCPUThrottlingRate', {'rate': cpu_throttle})
+    return page
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -136,6 +165,7 @@ def check_zoom_and_pan(context, page):
 
 
 def assert_pose(page, actor_id, motion, animated=False):
+    step(f'{actor_id} pose {motion}' + (' animated frames' if animated else ''))
     actor = page.locator(f'#{actor_id}')
     expect(actor).to_have_attribute('data-motion', motion)
     expect(actor.locator('.actor-motion')).to_be_visible()
@@ -153,6 +183,7 @@ def assert_pose(page, actor_id, motion, animated=False):
 
 
 def observe_interaction(page, object_id, hearts_before, normal_motion=False):
+    step(f'{object_id}: wait for joint arrival and action start, hearts={hearts_before}')
     game = page.locator('#game-screen')
     expect(game).to_have_attribute('data-phase', 'reacting', timeout=12_000)
     expect(game).to_have_attribute('data-interaction', object_id)
@@ -170,6 +201,7 @@ def observe_interaction(page, object_id, hearts_before, normal_motion=False):
     else:
         expect(page.locator('#partner')).to_have_attribute('data-motion', 'idle')
     if normal_motion and object_id == 'controller':
+        step('controller: reject repeated and unrelated activation during action')
         # Repeated activation or another target during a shared action must not
         # queue a second reward or interrupt one actor while the other continues.
         page.locator('[data-object="controller"]').press('Enter')
@@ -183,10 +215,13 @@ def observe_interaction(page, object_id, hearts_before, normal_motion=False):
 
 
 def check_game(context, page, width, height, character, normal_motion):
+    step(f'choose {character}, load artwork, inspect layout')
     choose_character(page, character)
     assert_images_loaded(page)
+    step('zoom buttons, touch pinch and pan')
     check_zoom_and_pan(context, page)
 
+    step('sound toggle')
     sound = page.locator('#sound-button')
     sound.tap()
     expect(sound).to_have_attribute('aria-pressed', 'true')
@@ -195,6 +230,7 @@ def check_game(context, page, width, height, character, normal_motion):
 
     # The cat is deliberately wrong for the first request; movement is allowed,
     # but the request and every heart must remain unchanged.
+    step('wrong target: cat while controller requested')
     first_request = page.locator('#dialogue-text').inner_text()
     initial_position = page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]')
     tap_object(page, 'cat')
@@ -210,13 +246,16 @@ def check_game(context, page, width, height, character, normal_motion):
     expect(filled_hearts(page)).to_have_count(0)
     expect(page.locator('#ending-screen')).to_be_hidden()
 
+    step('hint for controller')
     page.locator('#hint-button').tap()
     expect(page.locator('#scene-world')).to_have_attribute('data-hint', 'controller')
     expect(page.locator('#hint-glow')).to_have_class(re.compile(r'\bis-visible\b'))
 
     for index, object_id in enumerate(OBJECTS):
+        step(f'{object_id}: tap object')
         tap_object(page, object_id)
         observe_interaction(page, object_id, index, normal_motion)
+        step(f'{object_id}: finish action and grant heart {index + 1}')
         expect(filled_hearts(page)).to_have_count(index + 1, timeout=12_000)
         if index < 4:
             wait_ready(page)
@@ -227,13 +266,16 @@ def check_game(context, page, width, height, character, normal_motion):
             expect(page.locator('#ending-screen')).to_be_visible(timeout=10_000)
             expect(page.locator('#game-screen')).to_have_attribute('data-phase', 'ending')
         if (width, height) == (360, 780) and index == 1:
+            step('unfold to 768x900 with progress intact')
             page.set_viewport_size({'width': 768, 'height': 900})
             assert_layout(page)
             expect(filled_hearts(page)).to_have_count(2)
         if index == 3:
+            step('rotate to 844x390 with progress intact')
             page.set_viewport_size({'width': 844, 'height': 390})
             assert_layout(page)
             expect(filled_hearts(page)).to_have_count(4)
+    step('ending and replay as the other character')
     expect(page.locator('#ending-screen')).to_contain_text(re.compile(r'오늘도.*포근한 밤'))
     page.locator('#replay-button').tap()
     choose_character(page, 'girl' if character == 'boy' else 'boy')
@@ -248,6 +290,7 @@ def check_game(context, page, width, height, character, normal_motion):
 
 
 def check_desktop(page):
+    step('mouse movement and redirect cancellation')
     choose_character(page, 'boy', touch=False)
     assert_images_loaded(page)
     controller = page.locator('[data-object="controller"]')
@@ -259,6 +302,7 @@ def check_desktop(page):
     wait_ready(page)
     expect(filled_hearts(page)).to_have_count(0)
 
+    step('restart while companion walks to shared activity')
     # Restart while the companion is joining the shared activity. Its arrival
     # must not start an interaction in the next playthrough.
     controller.click()
@@ -274,6 +318,7 @@ def check_desktop(page):
     expect(filled_hearts(page)).to_have_count(0)
     wait_ready(page)
 
+    step('keyboard controller interaction')
     controller.focus()
     controller.press('Enter')
     observe_interaction(page, 'controller', 0)
@@ -281,6 +326,7 @@ def check_desktop(page):
     wait_ready(page)
     page.locator('[data-object="tea"]').click()
     observe_interaction(page, 'tea', 1)
+    step('restart during shared tea action, then advance clock')
     # Restart after both are already drinking, before either can earn a heart.
     page.locator('#change-character').click()
     choose_character(page, 'boy', touch=False)
@@ -301,7 +347,8 @@ def check_desktop(page):
     print('PASS 1280x900 desktop: mouse redirect, companion staging cancellation, keyboard interaction, restart during shared motion')
 
 
-def check_site(directory):
+def check_site(directory, cpu_throttle=1):
+    global CURRENT_CASE
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(directory)))
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
@@ -319,19 +366,15 @@ def check_site(directory):
                         has_touch=True, locale='ko-KR',
                         reduced_motion='no-preference' if index == 0 else 'reduce',
                     ) as context:
-                        page = context.new_page()
-                        page.set_default_timeout(10_000)
-                        page.on('pageerror', lambda error: errors.append(str(error)))
-                        page.on('requestfailed', lambda request: errors.append(request.url))
-                        page.on('response', lambda response: errors.append(f'{response.status} {response.url}') if response.status >= 400 else None)
+                        CURRENT_CASE = f'{width}x{height} touch, motion={"normal" if index == 0 else "reduced"}'
+                        step('page navigation')
+                        page = prepare_page(context, errors, cpu_throttle)
                         assert page.goto(url).status == 200
                         check_game(context, page, width, height, 'boy' if index % 2 == 0 else 'girl', index == 0)
                 with browser.new_context(viewport={'width': 1280, 'height': 900}, locale='ko-KR') as context:
-                    page = context.new_page()
-                    page.set_default_timeout(10_000)
-                    page.on('pageerror', lambda error: errors.append(str(error)))
-                    page.on('requestfailed', lambda request: errors.append(request.url))
-                    page.on('response', lambda response: errors.append(f'{response.status} {response.url}') if response.status >= 400 else None)
+                    CURRENT_CASE = '1280x900 desktop'
+                    step('page navigation')
+                    page = prepare_page(context, errors, cpu_throttle)
                     assert page.goto(url).status == 200
                     check_desktop(page)
                 assert not errors, errors
@@ -347,7 +390,14 @@ def check_site(directory):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--site', type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument('--cpu-throttle', type=float, default=1, help='Chromium CPU slowdown factor for reproducing CI timing failures (at least 1)')
     args = parser.parse_args()
+    if args.cpu_throttle < 1:
+        parser.error('--cpu-throttle must be at least 1')
     directory = args.site.resolve()
-    assert (directory / 'index.html').is_file(), f'No index.html in {directory}'
-    check_site(directory)
+    try:
+        assert (directory / 'index.html').is_file(), f'No index.html in {directory}'
+        check_site(directory, args.cpu_throttle)
+    except Exception:
+        annotate_failure()
+        raise
