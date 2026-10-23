@@ -1,12 +1,24 @@
-"""Exercise the exact static files that will be deployed, without an external server."""
+"""Play the shipped room game in mobile Chromium against a temporary HTTP server."""
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
+import re
 from pathlib import Path
 from threading import Thread
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
+
+
+OBJECTS = ('controller', 'tea', 'cat', 'mushroom', 'stars')
+VIEWPORTS = (
+    (320, 568),
+    (390, 844),
+    (412, 915),
+    (360, 780),
+    (768, 900),
+    (1024, 1366),
+)
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -14,73 +26,242 @@ class QuietHandler(SimpleHTTPRequestHandler):
         pass
 
 
-def assert_board_visible(page, height):
-    field = page.locator('#field').bounding_box()
-    assert field is not None
-    assert field['y'] >= -1 and field['y'] + field['height'] <= height + 1, field
-    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+def filled_hearts(page):
+    return page.locator('#hearts .is-filled')
+
+
+def wait_ready(page):
+    expect(page.locator('#game-screen')).to_have_attribute('data-phase', 'playing', timeout=10_000)
+
+
+def assert_layout(page):
+    # Mobile emulation updates innerHeight before dynamic viewport units and
+    # media-query layout have reached the next frame. Wait for actual geometry.
+    page.wait_for_function('''(size) => {
+        if (innerWidth !== size.width || innerHeight !== size.height) return false;
+        return ['#scene-viewport', '#dialogue-text', '#hint-button'].every(selector => {
+            const rect = document.querySelector(selector).getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top >= -1 && rect.bottom <= size.height + 1;
+        });
+    }''', arg=page.viewport_size, timeout=5000)
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Page overflows horizontally'
+    height = page.viewport_size['height']
+    for selector in ('#scene-viewport', '#dialogue-text', '#hint-button'):
+        box = page.locator(selector).bounding_box()
+        assert box is not None and box['width'] > 0 and box['height'] > 0, selector
+        assert box['y'] >= -1 and box['y'] + box['height'] <= height + 1, (selector, box, height)
+
+
+def assert_images_loaded(page):
+    page.wait_for_function("""() => [...document.images].every(image => image.complete && image.naturalWidth > 0)""")
+
+
+def choose_character(page, character, touch=True):
+    expect(page.locator('#character-screen')).to_be_visible()
+    choice = page.locator(f'#character-screen button[data-character="{character}"]')
+    choice.tap() if touch else choice.click()
+    expect(page.locator('#game-screen')).to_be_visible()
+    expect(page.locator('#character-screen')).to_be_hidden()
+    expect(page.locator('#player')).to_have_attribute('data-character', character)
+    wait_ready(page)
+    expect(filled_hearts(page)).to_have_count(0)
+    assert_layout(page)
+
+
+def tap_object(page, object_id):
+    target = page.locator(f'[data-object="{object_id}"]')
+    target.scroll_into_view_if_needed()
+    target.tap()
+
+
+def touch_drag(context, page):
+    """Use trusted touch input so a room drag cannot accidentally solve a quest."""
+    viewport = page.locator('#scene-viewport')
+    box = viewport.bounding_box()
+    x = box['x'] + box['width'] * .55
+    start_y = box['y'] + box['height'] * .75
+    end_y = box['y'] + box['height'] * .25
+    session = context.new_cdp_session(page)
+    try:
+        session.send('Input.dispatchTouchEvent', {
+            'type': 'touchStart', 'touchPoints': [{'x': x, 'y': start_y, 'id': 1}],
+        })
+        for step in range(1, 7):
+            session.send('Input.dispatchTouchEvent', {
+                'type': 'touchMove',
+                'touchPoints': [{'x': x, 'y': start_y + (end_y - start_y) * step / 6, 'id': 1}],
+            })
+        session.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+    finally:
+        session.detach()
+
+
+def touch_pinch(context, page):
+    box = page.locator('#scene-viewport').bounding_box()
+    center_x, center_y = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+    session = context.new_cdp_session(page)
+    def points(distance):
+        return [{'x': center_x - distance, 'y': center_y, 'id': 1},
+                {'x': center_x + distance, 'y': center_y, 'id': 2}]
+    try:
+        session.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': points(30)})
+        for distance in (34, 38, 42, 46, 50):
+            session.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': points(distance)})
+        session.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+    finally:
+        session.detach()
+
+
+def check_zoom_and_pan(context, page):
+    world = page.locator('#scene-world')
+    initial_width = world.bounding_box()['width']
+    page.locator('#zoom-in').tap()
+    page.wait_for_function('(width) => document.querySelector("#scene-world").getBoundingClientRect().width > width + 1', arg=initial_width)
+    enlarged_width = world.bounding_box()['width']
+    # Pinch input must resize the room without becoming a click.
+    touch_pinch(context, page)
+    page.wait_for_function('(width) => document.querySelector("#scene-world").getBoundingClientRect().width > width + 1', arg=enlarged_width)
+    viewport = page.locator('#scene-viewport')
+    viewport.evaluate('(element) => { element.scrollTop = 0; element.scrollLeft = 0; }')
+    touch_drag(context, page)
+    page.wait_for_function('() => document.querySelector("#scene-viewport").scrollTop > 5')
+    expect(filled_hearts(page)).to_have_count(0)
+    wait_ready(page)
+    page.locator('#zoom-out').tap()
+    page.locator('#zoom-reset').tap()
+    page.wait_for_function('(width) => Math.abs(document.querySelector("#scene-world").getBoundingClientRect().width - width) < 2', arg=initial_width)
+    assert enlarged_width > initial_width
+    assert_layout(page)
+
+
+def check_game(context, page, width, height, character, normal_motion):
+    choose_character(page, character)
+    assert_images_loaded(page)
+    check_zoom_and_pan(context, page)
+
+    sound = page.locator('#sound-button')
+    sound.tap()
+    expect(sound).to_have_attribute('aria-pressed', 'true')
+    sound.tap()
+    expect(sound).to_have_attribute('aria-pressed', 'false')
+
+    # The cat is deliberately wrong for the first request; movement is allowed,
+    # but the request and every heart must remain unchanged.
+    first_request = page.locator('#dialogue-text').inner_text()
+    initial_position = page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]')
+    tap_object(page, 'cat')
+    if normal_motion:
+        expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
+        expect(filled_hearts(page)).to_have_count(0)
+        page.wait_for_function('''(position) => {
+            const player = document.querySelector('#player');
+            return Math.abs(player.offsetLeft - position[0]) + Math.abs(player.offsetTop - position[1]) > 3;
+        }''', arg=initial_position)
+    wait_ready(page)
+    expect(filled_hearts(page)).to_have_count(0)
+    expect(page.locator('#ending-screen')).to_be_hidden()
+
+    page.locator('#hint-button').tap()
+    expect(page.locator('#scene-world')).to_have_attribute('data-hint', 'controller')
+    expect(page.locator('#hint-glow')).to_have_class(re.compile(r'\bis-visible\b'))
+
+    for index, object_id in enumerate(OBJECTS):
+        tap_object(page, object_id)
+        expect(filled_hearts(page)).to_have_count(index + 1, timeout=12_000)
+        if index < 4:
+            wait_ready(page)
+            expect(page.locator('#dialogue-text')).not_to_have_text(first_request)
+        else:
+            expect(page.locator('#ending-screen')).to_be_visible(timeout=10_000)
+            expect(page.locator('#game-screen')).to_have_attribute('data-phase', 'ending')
+        if (width, height) == (360, 780) and index == 1:
+            page.set_viewport_size({'width': 768, 'height': 900})
+            assert_layout(page)
+            expect(filled_hearts(page)).to_have_count(2)
+        if index == 3:
+            page.set_viewport_size({'width': 844, 'height': 390})
+            assert_layout(page)
+            expect(filled_hearts(page)).to_have_count(4)
+    expect(page.locator('#ending-screen')).to_contain_text(re.compile(r'오늘도.*포근한 밤'))
+    page.locator('#replay-button').tap()
+    choose_character(page, 'girl' if character == 'boy' else 'boy')
+    expect(page.locator('#ending-screen')).to_be_hidden()
+    expect(filled_hearts(page)).to_have_count(0)
+    tap_object(page, 'controller')
+    expect(filled_hearts(page)).to_have_count(1, timeout=12_000)
+    wait_ready(page)
+    page.locator('#change-character').tap()
+    expect(page.locator('#character-screen')).to_be_visible()
+    print(f'PASS {width}x{height}: selection, walking, wrong target, hint, zoom/pinch/touch pan, five requests, rotation, ending, replay')
+
+
+def check_desktop(page):
+    choose_character(page, 'boy', touch=False)
+    assert_images_loaded(page)
+    controller = page.locator('[data-object="controller"]')
+    controller.click()
+    expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
+    expect(filled_hearts(page)).to_have_count(0)
+    # A new destination must cancel the first walk and its deferred reward.
+    page.locator('[data-object="cat"]').click()
+    wait_ready(page)
+    expect(filled_hearts(page)).to_have_count(0)
+    controller.focus()
+    controller.press('Enter')
+    expect(filled_hearts(page)).to_have_count(1, timeout=12_000)
+    wait_ready(page)
+    page.locator('[data-object="tea"]').click()
+    expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
+    page.locator('#change-character').click()
+    choose_character(page, 'girl', touch=False)
+    new_request = page.locator('#dialogue-text').inner_text()
+    new_position = page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]')
+    # Advancing beyond the abandoned walk catches callbacks leaking between runs.
+    page.clock.install()
+    page.clock.fast_forward(30_000)
+    expect(filled_hearts(page)).to_have_count(0)
+    expect(page.locator('#player')).to_have_attribute('data-moving', 'false')
+    expect(page.locator('#dialogue-text')).to_have_text(new_request)
+    assert page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]') == new_position
+    wait_ready(page)
+    print('PASS 1280x900 desktop: mouse movement, redirected walk cancellation, keyboard interaction, restart during movement')
 
 
 def check_site(directory):
-    server = ThreadingHTTPServer(
-        ('127.0.0.1', 0), partial(QuietHandler, directory=str(directory))
-    )
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(QuietHandler, directory=str(directory)))
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
     errors = []
     url = f'http://127.0.0.1:{server.server_port}/'
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE'),
-                headless=True,
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE'), headless=True,
             )
             try:
-                for width, height in [(320, 568), (390, 844), (412, 915)]:
+                for index, (width, height) in enumerate(VIEWPORTS):
                     with browser.new_context(
-                        viewport={'width': width, 'height': height},
-                        is_mobile=True, has_touch=True, locale='ko-KR',
+                        viewport={'width': width, 'height': height}, is_mobile=True,
+                        has_touch=True, locale='ko-KR',
+                        reduced_motion='no-preference' if index == 0 else 'reduce',
                     ) as context:
                         page = context.new_page()
+                        page.set_default_timeout(10_000)
                         page.on('pageerror', lambda error: errors.append(str(error)))
                         page.on('requestfailed', lambda request: errors.append(request.url))
-                        page.on('response', lambda response: errors.append(
-                            f'{response.status} {response.url}'
-                        ) if response.status >= 400 else None)
+                        page.on('response', lambda response: errors.append(f'{response.status} {response.url}') if response.status >= 400 else None)
                         assert page.goto(url).status == 200
-                        assert page.locator('.room-art').evaluate(
-                            'image => image.complete && image.naturalWidth > 0'
-                        )
-                        assert page.locator('#star').is_hidden()
-                        page.clock.install()
-                        page.locator('#start').tap()
-                        assert page.locator('#start').is_disabled()
-                        assert page.locator('#message').is_hidden()
-                        assert_board_visible(page, height)
-                        for _ in range(3):
-                            page.locator('#star').tap()
-                        assert page.locator('#score').inner_text() == '3'
-                        page.set_viewport_size({'width': 844, 'height': 390})
-                        page.clock.run_for(200)
-                        assert_board_visible(page, 390)
-                        page.locator('#star').tap()
-                        assert page.locator('#score').inner_text() == '4'
-                        page.clock.fast_forward(21_000)
-                        assert page.locator('#time').inner_text() == '0'
-                        assert page.locator('#star').is_hidden()
-                        assert page.locator('#start').is_enabled()
-                        assert page.locator('#message-title').inner_text() == '오늘은 별 4개를 모았어요'
-                        assert page.locator('#best').inner_text() == '4'
-                        page.reload()
-                        assert page.locator('#best').inner_text() == '4'
-                        page.locator('#start').tap()
-                        assert page.locator('#score').inner_text() == '0'
-                        assert page.locator('#time').inner_text() == '20'
-                        page.locator('#star').tap()
-                        assert page.locator('#score').inner_text() == '1'
-                        print(f'PASS {width}x{height}: touch, rotation, finish, persistence, restart')
+                        check_game(context, page, width, height, 'boy' if index % 2 == 0 else 'girl', index == 0)
+                with browser.new_context(viewport={'width': 1280, 'height': 900}, locale='ko-KR') as context:
+                    page = context.new_page()
+                    page.set_default_timeout(10_000)
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    page.on('requestfailed', lambda request: errors.append(request.url))
+                    page.on('response', lambda response: errors.append(f'{response.status} {response.url}') if response.status >= 400 else None)
+                    assert page.goto(url).status == 200
+                    check_desktop(page)
                 assert not errors, errors
-                print('PASS: no browser errors, missing assets or failed requests')
+                print(f'PASS: {len(VIEWPORTS)} touch viewports + desktop, no browser errors, missing assets or failed requests')
             finally:
                 browser.close()
     finally:

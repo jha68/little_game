@@ -1,158 +1,697 @@
-'use strict';
+"use strict";
 
-const field = document.querySelector('#field');
-const star = document.querySelector('#star');
-const message = document.querySelector('#message');
-const start = document.querySelector('#start');
-const scoreLabel = document.querySelector('#score');
-const timeLabel = document.querySelector('#time');
-const bestLabel = document.querySelector('#best');
-const timerTrack = document.querySelector('.timer-track');
-const timerFill = document.querySelector('.timer-fill');
-const room = document.querySelector('.room-panel');
-const soundButton = document.querySelector('#sound');
-const duration = 20;
-const bestKey = 'little-game-best';
-let score = 0;
-let best = 0;
-let timer = null;
-let deadline = 0;
-let soundEnabled = false;
-let audio = null;
-
-try {
-  const saved = Number(localStorage.getItem(bestKey));
-  if (Number.isSafeInteger(saved) && saved >= 0) best = saved;
-} catch { /* The game also works when browser storage is unavailable. */ }
-bestLabel.textContent = best;
-
-function chime(frequency = 660) {
-  if (!soundEnabled || !audio) return;
-  const note = audio.createOscillator();
-  const gain = audio.createGain();
-  note.type = 'sine';
-  note.frequency.setValueAtTime(frequency, audio.currentTime);
-  note.frequency.exponentialRampToValueAtTime(frequency * 1.5, audio.currentTime + 0.12);
-  gain.gain.setValueAtTime(0, audio.currentTime);
-  gain.gain.linearRampToValueAtTime(0.08, audio.currentTime + 0.015);
-  gain.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.3);
-  note.connect(gain);
-  gain.connect(audio.destination);
-  note.start();
-  note.stop(audio.currentTime + 0.32);
-  note.onended = () => { note.disconnect(); gain.disconnect(); };
-}
-
-soundButton.addEventListener('click', async () => {
-  try {
-    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
-    if (audio.state === 'suspended') await audio.resume();
-    soundEnabled = !soundEnabled;
-    soundButton.setAttribute('aria-pressed', String(soundEnabled));
-    const label = soundEnabled ? '효과음 끄기' : '효과음 켜기';
-    soundButton.setAttribute('aria-label', label);
-    soundButton.title = label;
-    chime();
-  } catch {
-    soundEnabled = false;
-    soundButton.setAttribute('aria-pressed', 'false');
-    soundButton.setAttribute('aria-label', '이 브라우저에서는 효과음을 사용할 수 없어요');
-    soundButton.title = '이 브라우저에서는 효과음을 사용할 수 없어요';
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const W = 960,
+    H = 1536,
+    STEP = 24;
+  const viewport = $("#scene-viewport"),
+    canvas = $("#scene-canvas"),
+    world = $("#scene-world"),
+    screen = $("#game-screen");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const objects = [
+    {
+      id: "controller",
+      name: "보라색 게임패드",
+      x: 625,
+      y: 640,
+      w: 88,
+      h: 70,
+      stop: [590, 770],
+      clue: "우리 게임 한 판 할까? TV 옆에 컨트롤러를 뒀는데…",
+      reply: "좋아, 이번엔 내가 이길 거야!",
+      bubble: "한 판 더? ✦",
+      effect: "game",
+    },
+    {
+      id: "tea",
+      name: "탁자의 찻주전자",
+      x: 500,
+      y: 891,
+      w: 100,
+      h: 92,
+      stop: [565, 1010],
+      clue: "따뜻한 차 한 잔 더 마실까? 탁자 위 주전자에 남아 있을 거야.",
+      reply: "후우… 따뜻하다. 네 잔에도 따라 줄게.",
+      bubble: "따뜻한 한 잔 ♡",
+      effect: "steam",
+    },
+    {
+      id: "cat",
+      name: "바구니 속 고양이",
+      x: 658,
+      y: 1216,
+      w: 126,
+      h: 106,
+      stop: [575, 1255],
+      clue: "바구니에서 졸고 있는 작은 친구한테도 인사해 줘.",
+      reply: "골골… 우리랑 함께라서 좋은가 봐.",
+      bubble: "골골… ♡",
+      effect: "cat",
+    },
+    {
+      id: "mushroom",
+      name: "빨간 버섯 의자",
+      x: 674,
+      y: 704,
+      w: 110,
+      h: 102,
+      stop: [700, 810],
+      clue: "TV 오른쪽 빨간 버섯, 정말 앉을 수 있는 거야?",
+      reply: "폭신폭신해! 다음에는 여기 앉아야겠다.",
+      bubble: "내 자리 찜!",
+      effect: "mushroom",
+    },
+    {
+      id: "stars",
+      name: "벽 선반의 별 조명",
+      x: 593,
+      y: 335,
+      w: 136,
+      h: 84,
+      stop: [490, 745],
+      clue: "높은 벽 선반의 별 두 개, 밤이 깊어지기 전에 조금 더 밝혀 줄래?",
+      reply: "이제 딱 좋아. 오늘도 포근한 밤이 완성됐어.",
+      bubble: "우리의 작은 별빛 ✦",
+      effect: "stars",
+    },
+  ];
+  const state = {
+    character: "boy",
+    quest: 0,
+    phase: "choosing",
+    x: 565,
+    y: 1008,
+    zoom: 1,
+    scale: 1,
+    sound: false,
+    run: 0,
+    movement: 0,
+    frame: 0,
+    timer: 0,
+    hintTimer: 0,
+  };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  let player, partner, audio, resizeFrame;
+  // Walkable floor and furniture footprints use the same coordinates as the room.
+  const floor = [
+    [205, 815],
+    [445, 660],
+    [640, 750],
+    [790, 855],
+    [895, 970],
+    [925, 1460],
+    [65, 1460],
+    [65, 1000],
+  ];
+  const furniture = [
+    [400, 867, 145, 88],
+    [170, 1140, 225, 165],
+    [395, 1290, 230, 130],
+    [645, 1030, 135, 100],
+    [605, 1175, 120, 100],
+    [805, 1110, 90, 135],
+    [90, 1035, 90, 85],
+  ];
+  function onFloor(x, y) {
+    let inside = false;
+    for (let i = 0, j = floor.length - 1; i < floor.length; j = i++) {
+      const [xi, yi] = floor[i],
+        [xj, yj] = floor[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+        inside = !inside;
+    }
+    return (
+      inside &&
+      !furniture.some(
+        ([fx, fy, fw, fh]) => x > fx && x < fx + fw && y > fy && y < fy + fh,
+      )
+    );
   }
-});
-
-function moveStar() {
-  const padding = 18;
-  const topInset = 58;
-  const width = Math.max(0, field.clientWidth - star.offsetWidth - padding * 2);
-  const height = Math.max(0, field.clientHeight - star.offsetHeight - topInset - padding);
-  star.style.left = padding + Math.random() * width + 'px';
-  star.style.top = topInset + Math.random() * height + 'px';
-}
-
-function bringGameIntoView() {
-  if (window.matchMedia('(max-width: 960px)').matches) {
-    field.scrollIntoView({ block: 'start', behavior: 'instant' });
+  const grid = new Map();
+  for (let y = 660; y <= 1460; y += STEP)
+    for (let x = 60; x <= 925; x += STEP) {
+      if (onFloor(x, y)) grid.set(`${x},${y}`, { x, y, key: `${x},${y}` });
+    }
+  function nearest(point) {
+    let best,
+      score = Infinity;
+    for (const node of grid.values()) {
+      const d = dist(node, point);
+      if (d < score) {
+        score = d;
+        best = node;
+      }
+    }
+    return best;
   }
-}
-
-function updateTime(time) {
-  timeLabel.textContent = time;
-  timerFill.style.width = time / duration * 100 + '%';
-  timerTrack.setAttribute('aria-valuenow', time);
-  timerTrack.classList.toggle('urgent', time <= 5);
-}
-
-function finish() {
-  if (timer === null) return;
-  clearInterval(timer);
-  timer = null;
-  const returnFocus = document.activeElement === star;
-  star.style.display = 'none';
-  room.dataset.state = 'finished';
-  updateTime(0);
-  const isRecord = score > best;
-  if (isRecord) {
-    best = score;
-    bestLabel.textContent = best;
-    try { localStorage.setItem(bestKey, String(best)); } catch { /* Optional persistence. */ }
+  function pathTo(x, y) {
+    const start = nearest(state),
+      goal = nearest({ x, y }),
+      open = new Set([start.key]),
+      previous = new Map();
+    const cost = new Map([[start.key, 0]]),
+      rank = new Map([[start.key, dist(start, goal)]]);
+    while (open.size) {
+      let key;
+      for (const candidate of open)
+        if (!key || rank.get(candidate) < rank.get(key)) key = candidate;
+      if (key === goal.key) {
+        const path = [goal];
+        while (previous.has(key)) {
+          key = previous.get(key);
+          path.unshift(grid.get(key));
+        }
+        return path;
+      }
+      open.delete(key);
+      const node = grid.get(key);
+      for (const [dx, dy] of [
+        [STEP, 0],
+        [-STEP, 0],
+        [0, STEP],
+        [0, -STEP],
+        [STEP, STEP],
+        [-STEP, STEP],
+        [STEP, -STEP],
+        [-STEP, -STEP],
+      ]) {
+        const next = grid.get(`${node.x + dx},${node.y + dy}`);
+        if (!next) continue;
+        if (
+          dx &&
+          dy &&
+          (!grid.has(`${node.x + dx},${node.y}`) ||
+            !grid.has(`${node.x},${node.y + dy}`))
+        )
+          continue;
+        const candidate = cost.get(key) + Math.hypot(dx, dy);
+        if (candidate >= (cost.get(next.key) ?? Infinity)) continue;
+        previous.set(next.key, key);
+        cost.set(next.key, candidate);
+        rank.set(next.key, candidate + dist(next, goal));
+        open.add(next.key);
+      }
+    }
+    return [start];
   }
-  document.querySelector('#message-title').textContent = `오늘은 별 ${score}개를 모았어요`;
-  document.querySelector('#message-detail').textContent = isRecord
-    ? '새로운 최고 기록이에요! 반짝이는 순간을 기억해요.'
-    : '작은 별빛만큼 마음도 포근해졌길 바라요.';
-  message.hidden = false;
-  document.querySelector('#start-label').textContent = '한 번 더 모으기';
-  document.querySelector('#timer-status').textContent = '포근한 순간이었길 바라요';
-  start.disabled = false;
-  if (returnFocus) start.focus({ preventScroll: true });
-  chime(440);
-}
-
-start.addEventListener('click', () => {
-  if (timer !== null) return;
-  score = 0;
-  scoreLabel.textContent = score;
-  updateTime(duration);
-  message.hidden = true;
-  field.querySelectorAll('.catch-effect').forEach(effect => effect.remove());
-  star.style.display = 'block';
-  start.disabled = true;
-  room.dataset.state = 'playing';
-  document.querySelector('#start-label').textContent = '별을 모으는 중';
-  document.querySelector('#timer-status').textContent = '반짝이는 별을 찾아보세요';
-  moveStar();
-  deadline = performance.now() + duration * 1000;
-  timer = setInterval(() => {
-    const remaining = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
-    updateTime(remaining);
-    if (remaining === 0) finish();
-  }, 100);
-  star.focus({ preventScroll: true });
-  // A tap on a below-the-fold start button must bring every target into view.
-  bringGameIntoView();
-  chime(523.25);
-});
-
-star.addEventListener('click', () => {
-  if (timer === null) return;
-  if (performance.now() >= deadline) { finish(); return; }
-  scoreLabel.textContent = ++score;
-  const effect = document.createElement('span');
-  effect.className = 'catch-effect';
-  effect.textContent = '+1 ✦';
-  effect.setAttribute('aria-hidden', 'true');
-  effect.style.left = star.offsetLeft + 8 + 'px';
-  effect.style.top = star.offsetTop + 'px';
-  field.append(effect);
-  setTimeout(() => effect.remove(), 700);
-  chime(660 + score % 5 * 55);
-  moveStar();
-});
-
-new ResizeObserver(() => {
-  if (timer === null) return;
-  moveStar();
-  // Rotation can move the board below the fold even if it fit before.
-  requestAnimationFrame(bringGameIntoView);
-}).observe(field);
+  function phase(value) {
+    state.phase = value;
+    screen.dataset.phase = value;
+  }
+  function speak(text, short = text) {
+    $("#dialogue-text").textContent = text;
+    $("#speech-text").textContent = short;
+    $("#speech-bubble").hidden = false;
+  }
+  function paintPlayer() {
+    player.style.left = `${state.x}px`;
+    player.style.top = `${state.y}px`;
+    player.style.zIndex = Math.round(state.y);
+    $("#speech-bubble").style.left = `${clamp(state.x, 170, 790)}px`;
+    $("#speech-bubble").style.top = `${state.y - 195}px`;
+  }
+  function renderHearts() {
+    $("#hearts").replaceChildren(
+      ...objects.map((_, i) => {
+        const el = document.createElement("span");
+        el.className = `heart${i < state.quest ? " is-filled" : ""}`;
+        el.textContent = "♥";
+        el.setAttribute("aria-hidden", "true");
+        return el;
+      }),
+    );
+    $("#hearts").setAttribute(
+      "aria-label",
+      `따뜻한 마음 ${state.quest}개, 모두 5개`,
+    );
+    $("#progress-label").textContent = `${state.quest} / 5`;
+  }
+  function actor(character, id, x, y) {
+    const el = document.createElement("div");
+    el.id = id;
+    el.className = "actor";
+    el.dataset.character = character;
+    el.dataset.moving = "false";
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.zIndex = Math.round(y);
+    el.setAttribute("aria-hidden", "true");
+    const img = new Image();
+    img.src = `assets/${character}.webp`;
+    img.alt = "";
+    img.className = "actor-sprite";
+    img.draggable = false;
+    el.append(img);
+    return el;
+  }
+  function hideHint() {
+    clearTimeout(state.hintTimer);
+    $("#hint-glow").classList.remove("is-visible");
+    delete world.dataset.hint;
+  }
+  function clearRun() {
+    state.run++;
+    state.movement++;
+    cancelAnimationFrame(state.frame);
+    clearTimeout(state.timer);
+    hideHint();
+    $("#effects")
+      .querySelectorAll(".interaction-effect,.destination-ring")
+      .forEach((el) => el.remove());
+    world.classList.remove("is-complete");
+  }
+  function start(character) {
+    clearRun();
+    state.character = character;
+    state.quest = 0;
+    state.zoom = 1;
+    state.x = character === "boy" ? 565 : 365;
+    state.y = 1008;
+    $("#character-screen").hidden = true;
+    $("#ending-screen").hidden = true;
+    screen.hidden = false;
+    screen.inert = false;
+    $("#actors").replaceChildren();
+    player = actor(character, "player", state.x, state.y);
+    partner = actor(
+      character === "boy" ? "girl" : "boy",
+      "partner",
+      character === "boy" ? 365 : 565,
+      1008,
+    );
+    $("#actors").append(player, partner);
+    $("#dialogue-avatar").src =
+      `assets/${character === "boy" ? "girl" : "boy"}.webp`;
+    $("#dialogue-speaker").textContent =
+      character === "boy" ? "분홍 잠옷 친구의 부탁" : "파란 잠옷 친구의 부탁";
+    objects.forEach((o) =>
+      $(`[data-object="${o.id}"]`).classList.remove("is-found"),
+    );
+    renderHearts();
+    phase("playing");
+    paintPlayer();
+    speak(objects[0].clue, "우리 게임 한 판 할까?");
+    requestAnimationFrame(() => {
+      layout(false);
+      viewport.scrollTo({
+        left: 0,
+        top:
+          H * state.scale > viewport.clientHeight + 5
+            ? 880 * state.scale - viewport.clientHeight / 2
+            : 0,
+        behavior: "instant",
+      });
+    });
+    $("#hint-button").disabled = false;
+    $("#hint-button").focus({ preventScroll: true });
+  }
+  function updateSound() {
+    const button = $("#sound-button");
+    button.setAttribute("aria-pressed", String(state.sound));
+    button.setAttribute(
+      "aria-label",
+      state.sound ? "효과음 끄기" : "효과음 켜기",
+    );
+    button.title = button.getAttribute("aria-label");
+    button.dataset.enabled = String(state.sound);
+  }
+  function sound(kind) {
+    if (!state.sound) return;
+    try {
+      if (!audio)
+        audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") void audio.resume().catch(() => {});
+      const notes =
+        kind === "game"
+          ? [523, 659, 784, 1046]
+          : kind === "cat"
+            ? [330, 392]
+            : [523, 659, 784];
+      notes.forEach((note, i) => {
+        const oscillator = audio.createOscillator(),
+          gain = audio.createGain(),
+          time = audio.currentTime + i * 0.11;
+        oscillator.type = kind === "game" ? "triangle" : "sine";
+        oscillator.frequency.value = note;
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(0.045, time + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
+        oscillator.connect(gain);
+        gain.connect(audio.destination);
+        oscillator.start(time);
+        oscillator.stop(time + 0.32);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          gain.disconnect();
+        };
+      });
+    } catch {
+      state.sound = false;
+      updateSound();
+    }
+  }
+  function effect(object, ending = false) {
+    const el = document.createElement("div");
+    el.className = `interaction-effect effect-${object.effect}`;
+    el.style.left = `${object.x}px`;
+    el.style.top = `${object.y}px`;
+    el.setAttribute("aria-hidden", "true");
+    const symbols =
+      object.effect === "steam"
+        ? ["〰", "〰", "〰"]
+        : object.effect === "cat" || ending
+          ? ["♡", "♥", "♡"]
+          : ["✧", "✦", "✧", "✦"];
+    symbols.forEach((symbol, i) => {
+      const p = document.createElement("span");
+      p.textContent = symbol;
+      p.style.setProperty("--i", i);
+      el.append(p);
+    });
+    const caption = document.createElement("b");
+    caption.textContent = object.bubble;
+    el.append(caption);
+    $("#effects").append(el);
+    setTimeout(() => el.remove(), ending ? 7000 : 4300);
+    sound(object.effect);
+  }
+  function finish() {
+    phase("ending");
+    hideHint();
+    world.classList.add("is-complete");
+    $("#hint-button").disabled = true;
+    speak("오늘도 포근한 밤이 완성됐어요.", "함께라서 더 포근한 밤 ♡");
+    effect({ x: state.x, y: state.y - 180, effect: "cat", bubble: "♡" }, true);
+    effect(
+      { x: parseFloat(partner.style.left), y: 810, effect: "cat", bubble: "♡" },
+      true,
+    );
+    $("#ending-screen").hidden = false;
+    screen.inert = true;
+    $("#replay-button").focus({ preventScroll: true });
+  }
+  function arrived(object) {
+    if (!object) {
+      phase("playing");
+      speak(objects[state.quest].clue);
+      return;
+    }
+    const expected = objects[state.quest];
+    if (object !== expected) {
+      phase("playing");
+      speak(
+        state.quest > objects.indexOf(object)
+          ? "여긴 아까 함께했지. 다음 작은 부탁도 들어줄래?"
+          : "여기도 포근하네. 지금 부탁은 다른 곳에 있는 것 같아.",
+        expected.clue,
+      );
+      return;
+    }
+    phase("reacting");
+    hideHint();
+    state.quest++;
+    $(`[data-object="${object.id}"]`).classList.add("is-found");
+    player.classList.add("is-interacting");
+    renderHearts();
+    speak(object.reply, object.bubble);
+    effect(object);
+    const run = state.run;
+    state.timer = setTimeout(
+      () => {
+        if (run !== state.run) return;
+        player.classList.remove("is-interacting");
+        if (state.quest === objects.length) finish();
+        else {
+          phase("playing");
+          speak(objects[state.quest].clue);
+        }
+      },
+      reduced.matches ? 600 : 1300,
+    );
+  }
+  function walk(x, y, object = null) {
+    if (!["playing", "walking"].includes(state.phase)) return;
+    const path = [{ x: state.x, y: state.y }, ...pathTo(x, y)],
+      lengths = path.slice(1).map((p, i) => dist(path[i], p)),
+      total = lengths.reduce((a, b) => a + b, 0);
+    const duration = reduced.matches
+      ? clamp(total, 180, 500)
+      : clamp(total / 0.27, 450, 3200);
+    cancelAnimationFrame(state.frame);
+    const movement = ++state.movement;
+    phase("walking");
+    player.classList.add("is-walking");
+    player.dataset.moving = "true";
+    $("#speech-bubble").hidden = true;
+    $("#effects")
+      .querySelectorAll(".destination-ring")
+      .forEach((el) => el.remove());
+    const marker = document.createElement("span");
+    marker.className = "destination-ring";
+    marker.style.left = `${path.at(-1).x}px`;
+    marker.style.top = `${path.at(-1).y}px`;
+    $("#effects").append(marker);
+    let started;
+    function tick(now) {
+      if (movement !== state.movement) return;
+      started ??= now;
+      const progress = Math.min(1, (now - started) / duration);
+      let travelled = progress * total,
+        index = 0;
+      while (index < lengths.length - 1 && travelled > lengths[index])
+        travelled -= lengths[index++];
+      const a = path[index],
+        b = path[index + 1] || a,
+        part = lengths[index] ? travelled / lengths[index] : 1;
+      player.classList.toggle("is-facing-left", b.x < a.x);
+      state.x = a.x + (b.x - a.x) * part;
+      state.y = a.y + (b.y - a.y) * part;
+      paintPlayer();
+      if (progress < 1) state.frame = requestAnimationFrame(tick);
+      else {
+        marker.remove();
+        player.classList.remove("is-walking");
+        player.dataset.moving = "false";
+        arrived(object);
+      }
+    }
+    state.frame = requestAnimationFrame(tick);
+  }
+  function baseScale() {
+    return Math.min(
+      viewport.clientWidth / W,
+      Math.max(viewport.clientHeight / H, 0.3),
+    );
+  }
+  function layout(preserve = true) {
+    if (screen.hidden) return;
+    const center = {
+      x:
+        (viewport.scrollLeft + viewport.clientWidth / 2 - canvas.offsetLeft) /
+        state.scale,
+      y: (viewport.scrollTop + viewport.clientHeight / 2) / state.scale,
+    };
+    state.scale = baseScale() * state.zoom;
+    canvas.style.width = `${W * state.scale}px`;
+    canvas.style.height = `${H * state.scale}px`;
+    world.style.transform = `scale(${state.scale})`;
+    world.style.setProperty("--scene-scale", state.scale);
+    objects.forEach((o) => {
+      const b = $(`[data-object="${o.id}"]`);
+      b.style.width = `${Math.max(o.w, 44 / state.scale)}px`;
+      b.style.height = `${Math.max(o.h, 44 / state.scale)}px`;
+    });
+    if (preserve)
+      viewport.scrollTo(
+        center.x * state.scale + canvas.offsetLeft - viewport.clientWidth / 2,
+        center.y * state.scale - viewport.clientHeight / 2,
+      );
+    $("#zoom-out").disabled = state.zoom <= 1.001;
+    $("#zoom-in").disabled = state.zoom >= 2.999;
+    $("#zoom-reset").setAttribute(
+      "aria-label",
+      `방 전체 보기, 현재 ${Math.round(state.zoom * 100)}%`,
+    );
+  }
+  function zoomTo(value, focal) {
+    const rect = viewport.getBoundingClientRect(),
+      bounds = world.getBoundingClientRect();
+    const local = focal
+      ? { x: focal.x - rect.left, y: focal.y - rect.top }
+      : { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
+    const anchor = {
+      x: ((focal?.x ?? rect.left + local.x) - bounds.left) / state.scale,
+      y: ((focal?.y ?? rect.top + local.y) - bounds.top) / state.scale,
+    };
+    state.zoom = clamp(value, 1, 3);
+    layout(false);
+    viewport.scrollLeft = anchor.x * state.scale + canvas.offsetLeft - local.x;
+    viewport.scrollTop = anchor.y * state.scale - local.y;
+  }
+  function reveal(o) {
+    viewport.scrollTo({
+      left: o.x * state.scale + canvas.offsetLeft - viewport.clientWidth / 2,
+      top: o.y * state.scale - viewport.clientHeight / 2,
+      behavior: reduced.matches ? "instant" : "smooth",
+    });
+  }
+  const pointers = new Map();
+  let gesture = null;
+  viewport.style.touchAction = "none";
+  const pair = () => [...pointers.values()].slice(0, 2);
+  viewport.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || screen.hidden) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    viewport.setPointerCapture(e.pointerId);
+    if (pointers.size === 1)
+      gesture = {
+        x: e.clientX,
+        y: e.clientY,
+        moved: false,
+        pinched: false,
+        left: viewport.scrollLeft,
+        top: viewport.scrollTop,
+      };
+    else if (pointers.size === 2) {
+      const [a, b] = pair();
+      gesture.moved = true;
+      gesture.pinched = true;
+      gesture.pinchDistance = dist(a, b);
+      gesture.pinchZoom = state.zoom;
+    }
+  });
+  viewport.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId) || !gesture) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size >= 2) {
+      const [a, b] = pair();
+      zoomTo(
+        (gesture.pinchZoom * dist(a, b)) / Math.max(1, gesture.pinchDistance),
+        { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      );
+    } else if (!gesture.pinched) {
+      const dx = e.clientX - gesture.x,
+        dy = e.clientY - gesture.y;
+      if (Math.hypot(dx, dy) > 8) gesture.moved = true;
+      if (gesture.moved) {
+        viewport.scrollLeft = gesture.left - dx;
+        viewport.scrollTop = gesture.top - dy;
+      }
+    }
+  });
+  viewport.addEventListener("pointerup", (e) => {
+    const tap =
+      pointers.size === 1 && gesture && !gesture.moved && !gesture.pinched;
+    pointers.delete(e.pointerId);
+    if (tap && ["playing", "walking"].includes(state.phase)) {
+      const bounds = world.getBoundingClientRect(),
+        x = (e.clientX - bounds.left) / state.scale,
+        y = (e.clientY - bounds.top) / state.scale;
+      // At fit scale large touch areas can overlap: choose the closest actual prop.
+      const hits = objects.filter(
+        (o) =>
+          Math.abs(x - o.x) <= Math.max(o.w, 44 / state.scale) / 2 &&
+          Math.abs(y - o.y) <= Math.max(o.h, 44 / state.scale) / 2,
+      );
+      hits.sort((a, b) => dist(a, { x, y }) - dist(b, { x, y }));
+      if (hits.length) walk(...hits[0].stop, hits[0]);
+      else if (onFloor(x, y)) walk(x, y);
+      else if (state.phase === "playing")
+        speak(
+          "바닥을 톡 누르면 걸어갈게. 작은 부탁이 떠오르면 소품을 눌러 줘.",
+          objects[state.quest].clue,
+        );
+    }
+    if (!pointers.size) gesture = null;
+  });
+  viewport.addEventListener("pointercancel", (e) => {
+    pointers.delete(e.pointerId);
+    if (gesture) gesture.moved = true;
+    if (!pointers.size) gesture = null;
+  });
+  viewport.addEventListener("keydown", (e) => {
+    if (e.target !== viewport || !["playing", "walking"].includes(state.phase))
+      return;
+    const keys = {
+      ArrowLeft: [-90, 0],
+      ArrowRight: [90, 0],
+      ArrowUp: [0, -90],
+      ArrowDown: [0, 90],
+    };
+    if (keys[e.key]) {
+      e.preventDefault();
+      walk(state.x + keys[e.key][0], state.y + keys[e.key][1]);
+    }
+  });
+  objects.forEach((o) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hotspot";
+    button.dataset.object = o.id;
+    button.style.left = `${o.x}px`;
+    button.style.top = `${o.y}px`;
+    button.setAttribute("aria-label", o.name);
+    button.addEventListener("click", (e) => {
+      if (e.detail === 0) walk(...o.stop, o);
+    });
+    $("#hotspots").append(button);
+  });
+  if (!$("#hint-glow")) {
+    const hint = document.createElement("div");
+    hint.id = "hint-glow";
+    hint.setAttribute("aria-hidden", "true");
+    $("#effects").append(hint);
+  }
+  document
+    .querySelectorAll("button[data-character]")
+    .forEach((b) =>
+      b.addEventListener("click", () => start(b.dataset.character)),
+    );
+  $("#hint-button").addEventListener("click", () => {
+    if (!["playing", "walking"].includes(state.phase)) return;
+    const o = objects[state.quest];
+    hideHint();
+    const glow = $("#hint-glow");
+    glow.style.left = `${o.x}px`;
+    glow.style.top = `${o.y}px`;
+    glow.classList.add("is-visible");
+    world.dataset.hint = o.id;
+    reveal(o);
+    speak(o.clue, "이 근처를 천천히 살펴봐 ♡");
+    state.hintTimer = setTimeout(hideHint, 4500);
+  });
+  $("#sound-button").addEventListener("click", () => {
+    state.sound = !state.sound;
+    updateSound();
+    sound("stars");
+  });
+  $("#zoom-in").addEventListener("click", () => zoomTo(state.zoom + 0.4));
+  $("#zoom-out").addEventListener("click", () => zoomTo(state.zoom - 0.4));
+  $("#zoom-reset").addEventListener("click", () => {
+    state.zoom = 1;
+    layout(false);
+    viewport.scrollTo(0, 0);
+  });
+  function chooseAgain() {
+    clearRun();
+    phase("choosing");
+    screen.hidden = true;
+    screen.inert = false;
+    $("#ending-screen").hidden = true;
+    $("#character-screen").hidden = false;
+    $(`button[data-character="${state.character}"]`).focus({
+      preventScroll: true,
+    });
+  }
+  $("#change-character").addEventListener("click", chooseAgain);
+  $("#replay-button").addEventListener("click", chooseAgain);
+  new ResizeObserver(() => {
+    cancelAnimationFrame(resizeFrame);
+    resizeFrame = requestAnimationFrame(() => layout());
+  }).observe(viewport);
+  updateSound();
+  renderHearts();
+})();

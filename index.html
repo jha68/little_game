@@ -2,76 +2,117 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f3f8">
-  <meta name="description" content="보라빛 작은 방에서 보내는 20초의 휴식. 반짝이는 별을 모아보세요.">
-  <title>별이 머무는 방 — Little Game</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%239270a9'/%3E%3Cpath d='m32 10 6 15 16 1-12 11 4 16-14-9-14 9 4-16-12-11 16-1Z' fill='%23ffe5ac'/%3E%3C/svg%3E">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6e547d">
+  <meta name="description" content="차 한 잔, 게임 한 판, 고양이에게 인사. 보라빛 작은 방을 걸으며 다섯 가지 부탁을 들어주는 포근한 터치 게임.">
+  <title>오늘도, 포근한 밤 — 우리의 작은 방</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='20' fill='%237a5a8f'/%3E%3Cpath d='M44 39a19 19 0 0 1-23-25 21 21 0 1 0 23 25' fill='%23ffe5ad'/%3E%3Cpath d='m43 11 2 6 6 2-6 2-2 6-2-6-6-2 6-2Z' fill='%23ffe5ad'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
   <script src="game.js" defer></script>
 </head>
 <body>
-  <svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
-    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
-    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20 14.4A8.6 8.6 0 0 1 9.6 4a8.5 8.5 0 1 0 10.8 10.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
-    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
-    <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M12 20 4 12C-2 5 7 0 12 7c5-7 14-2 8 5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+  <svg class="svg-library" aria-hidden="true"><defs>
+    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M19.5 14.4A8.1 8.1 0 0 1 9.6 4.5a8.2 8.2 0 1 0 9.9 9.9Z"/><path d="m18 3 .6 2.4L21 6l-2.4.6L18 9l-.6-2.4L15 6l2.4-.6Z"/></symbol>
+    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
+    <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M20.5 5.6a5.2 5.2 0 0 0-7.4 0L12 6.7l-1.1-1.1a5.2 5.2 0 1 0-7.4 7.4L12 21l8.5-8a5.2 5.2 0 0 0 0-7.4Z"/></symbol>
+    <symbol id="icon-sparkle" viewBox="0 0 24 24"><path d="m10 3 2.3 6.7L19 12l-6.7 2.3L10 21l-2.3-6.7L1 12l6.7-2.3Z"/><path d="m19 2 .8 2.2L22 5l-2.2.8L19 8l-.8-2.2L16 5l2.2-.8Z"/></symbol>
+    <symbol id="icon-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="icon-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="icon-fit" viewBox="0 0 24 24"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
+    <symbol id="icon-repeat" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1"/></symbol>
+    <symbol id="icon-touch" viewBox="0 0 24 24"><path d="M8 12V5a2 2 0 0 1 4 0v6m0-2 6 2a3 3 0 0 1 2 3l-1 6H9l-5-6a2 2 0 0 1 3-2l1 1"/></symbol>
   </defs></svg>
-  <header class="site-header">
-    <div class="brand"><svg class="brand-icon" aria-hidden="true"><use href="#icon-star"/></svg><span>LITTLE GAME</span></div>
-    <div class="header-note">당신을 위한 작은 쉼표</div>
-  </header>
-  <main>
-    <section class="intro" aria-labelledby="page-title">
-      <p class="eyebrow">A COZY ROOM, A LITTLE MAGIC</p>
-      <h1 id="page-title">별이 머무는 <span>방</span></h1>
-      <p>오늘도 수고했어요. 잠깐, 반짝이는 순간을 모아볼까요?</p>
-    </section>
-    <section class="game-shell" aria-label="20초 별 잡기 게임">
-      <div class="room-panel" data-state="idle">
-        <div class="room-top">
-          <span class="room-label"><svg aria-hidden="true"><use href="#icon-moon"/></svg>MY LITTLE ROOM</span>
-          <button type="button" class="sound-button" id="sound" aria-label="효과음 켜기" aria-pressed="false" title="효과음 켜기">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z" stroke-linejoin="round"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" stroke-linecap="round"/></svg>
+
+  <main id="app">
+    <section id="character-screen" aria-labelledby="welcome-title">
+      <div class="welcome-scene" aria-hidden="true">
+        <img src="assets/room.webp" alt="" class="welcome-room" fetchpriority="high" draggable="false">
+        <div class="welcome-scene-shade"></div>
+        <div class="welcome-scene-note"><span class="tiny-star">✧</span><span>A LITTLE ROOM.<br>A LOVELY NIGHT.</span></div>
+        <span class="welcome-star star-one">✦</span><span class="welcome-star star-two">✧</span><span class="welcome-star star-three">✧</span>
+      </div>
+      <div class="welcome-content">
+        <div class="welcome-brand"><svg aria-hidden="true"><use href="#icon-moon"/></svg><span>우리의 작은 방</span></div>
+        <p class="eyebrow">MAKE YOURSELF AT HOME</p>
+        <h1 id="welcome-title">오늘도,<br><em>포근한 밤.</em></h1>
+        <p class="welcome-description">차 한 잔, 게임 한 판, 고양이에게 인사.<br>이 방의 작은 부탁 다섯 가지를 들어주세요.</p>
+        <div class="choice-heading"><span>오늘은 누구로 머물까요?</span><span class="choice-line"></span><span aria-hidden="true">✧</span></div>
+        <div class="character-choices" role="group" aria-label="플레이할 캐릭터 선택">
+          <button type="button" class="character-choice boy-choice" data-character="boy" aria-label="남자 캐릭터로 시작하기">
+            <span class="character-art"><span class="character-halo"></span><img src="assets/boy.webp" alt="파란 잠옷을 입은 남자 캐릭터" draggable="false"></span>
+            <span class="character-choice-caption"><span><strong>남자 캐릭터</strong><small>파란 잠옷의 친구</small></span><svg aria-hidden="true"><use href="#icon-arrow"/></svg></span>
+          </button>
+          <button type="button" class="character-choice girl-choice" data-character="girl" aria-label="여자 캐릭터로 시작하기">
+            <span class="character-art"><span class="character-halo"></span><img src="assets/girl.webp" alt="분홍 잠옷을 입은 여자 캐릭터" draggable="false"></span>
+            <span class="character-choice-caption"><span><strong>여자 캐릭터</strong><small>분홍 잠옷의 친구</small></span><svg aria-hidden="true"><use href="#icon-arrow"/></svg></span>
           </button>
         </div>
-        <div id="field" aria-label="별이 나타나는 아늑한 보라색 방">
-          <img class="room-art" src="assets/room.svg" alt="보라색 커튼과 소파, 따뜻한 조명, 찻잔과 잠든 고양이가 있는 작은 방" draggable="false">
-          <span class="ambient-star one" aria-hidden="true">✦</span><span class="ambient-star two" aria-hidden="true">✧</span><span class="ambient-star three" aria-hidden="true">✦</span>
-          <button type="button" id="star" aria-label="별 잡기">
-            <svg viewBox="0 0 60 60" aria-hidden="true"><path d="M30 5 38 20 55 23 43 35 45 53 30 45 14 53 17 35 5 23 22 20Z" fill="#ffe39a" stroke="#fff4cb" stroke-width="2.5" stroke-linejoin="round"/><path d="m30 10 6 13 14 2" stroke="#fff5cd" stroke-width="2" stroke-linecap="round"/><path d="M24 30v3m12-3v3" stroke="#a47b6d" stroke-width="2.5" stroke-linecap="round"/><path d="M27 37q3 3 6 0" stroke="#a47b6d" stroke-width="1.6" stroke-linecap="round" fill="none"/><ellipse cx="20" cy="36" rx="3" ry="1.5" fill="#edb1a5"/><ellipse cx="40" cy="36" rx="3" ry="1.5" fill="#edb1a5"/></svg>
-          </button>
-          <div id="message" class="message" role="status" aria-live="polite" aria-atomic="true">
-            <strong><span class="message-icon" aria-hidden="true">✧</span><span id="message-title">작은 별들이 당신을 기다려요</span></strong>
-            <p id="message-detail">준비되면 아래의 시작 버튼을 눌러주세요</p>
+        <p class="welcome-help"><svg aria-hidden="true"><use href="#icon-touch"/></svg>터치로 걷고, 작은 행복을 찾아요</p>
+        <p class="welcome-footnote">시간 제한 없이, 천천히 즐겨주세요.</p>
+      </div>
+    </section>
+
+    <section id="game-screen" aria-label="다섯 가지 작은 부탁" hidden>
+      <header class="game-header">
+        <div class="game-brand"><span class="brand-mark"><svg aria-hidden="true"><use href="#icon-moon"/></svg></span><span><strong>우리의 작은 방</strong><small>A COZY LITTLE NIGHT</small></span></div>
+        <div class="progress" aria-label="부탁 진행 상황">
+          <span id="progress-label">작은 부탁 0 / 5</span>
+          <div id="hearts" aria-label="하트 0개, 총 5개"><span class="heart">♡</span><span class="heart">♡</span><span class="heart">♡</span><span class="heart">♡</span><span class="heart">♡</span></div>
+        </div>
+        <div class="header-actions">
+          <button type="button" id="sound-button" class="icon-button" aria-label="효과음 켜기" aria-pressed="false" title="효과음 켜기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg></button>
+          <button type="button" id="change-character" class="icon-button" aria-label="캐릭터 다시 선택하기" title="캐릭터 다시 선택하기"><svg aria-hidden="true"><use href="#icon-person"/></svg></button>
+        </div>
+      </header>
+      <div class="game-workspace">
+        <div id="scene-viewport" tabindex="0" aria-label="보라빛 방. 바닥을 눌러 이동하고, 물건을 눌러 상호작용하세요. 확대 후 화면을 밀어 둘러볼 수 있어요.">
+          <div id="scene-canvas">
+            <div id="scene-world">
+              <img id="room-image" src="assets/room.webp" width="960" height="1536" alt="보라색 벽과 커튼, 작은 찻상, 텔레비전, 버섯 의자, 별 조명과 고양이의 바구니가 있는 아늑한 방" draggable="false">
+              <div id="room-glow" aria-hidden="true"></div>
+              <div id="hotspots"></div>
+              <div id="actors"></div>
+              <div id="effects" aria-hidden="true"></div>
+              <div id="speech-bubble" hidden aria-hidden="true"><span id="speech-text"></span></div>
+            </div>
           </div>
-          <p class="room-caption" aria-hidden="true">a little place to slow down & shine</p>
         </div>
+        <div class="scene-caption" aria-hidden="true"><span class="live-dot"></span>오늘 밤, 우리 둘의 아지트</div>
+        <div class="scene-tools" role="group" aria-label="방 확대 및 축소">
+          <button type="button" id="zoom-out" class="icon-button" aria-label="방 축소" title="축소"><svg aria-hidden="true"><use href="#icon-minus"/></svg></button>
+          <span class="zoom-divider" aria-hidden="true"></span>
+          <button type="button" id="zoom-in" class="icon-button" aria-label="방 확대" title="확대"><svg aria-hidden="true"><use href="#icon-plus"/></svg></button>
+          <span class="zoom-divider" aria-hidden="true"></span>
+          <button type="button" id="zoom-reset" class="icon-button" aria-label="방 전체 보기" title="방 전체 보기"><svg aria-hidden="true"><use href="#icon-fit"/></svg></button>
+        </div>
+        <p id="navigation-tip" class="navigation-tip">바닥을 누르면 걸어가요 · 두 손가락으로 확대</p>
       </div>
-      <div class="game-panel">
-        <p class="panel-heading"><svg aria-hidden="true"><use href="#icon-star"/></svg>COLLECT LITTLE STARS</p>
-        <h2>오늘의 별 모으기</h2>
-        <p class="panel-description">포근한 방에 찾아온 작은 별들.<br>20초 동안 하나씩 모아주세요.</p>
-        <div class="stats">
-          <div class="stat"><span class="stat-label"><svg aria-hidden="true"><use href="#icon-star"/></svg>모은 별</span><div class="stat-value"><strong id="score">0</strong><span>개</span></div></div>
-          <div class="stat"><span class="stat-label"><svg aria-hidden="true"><use href="#icon-clock"/></svg>남은 시간</span><div class="stat-value"><strong id="time">20</strong><span>초</span></div></div>
+      <footer class="dialogue-panel">
+        <div class="dialogue-avatar" aria-hidden="true"><img id="dialogue-avatar" src="assets/girl.webp" alt="" draggable="false"><span class="avatar-star">✦</span></div>
+        <div class="dialogue-content">
+          <div class="dialogue-heading"><span id="dialogue-speaker">우리의 작은 부탁</span><span class="dialogue-heading-line"></span><span class="dialogue-mood" aria-hidden="true">✧</span></div>
+          <p id="dialogue-text" aria-live="polite" aria-atomic="true">우리 게임 한 판 할까? 컨트롤러 어디 뒀더라?</p>
+          <p class="dialogue-guidance">이야기에 어울리는 물건을 찾아 눌러주세요.</p>
         </div>
-        <div class="timer-track" role="progressbar" aria-label="남은 시간" aria-valuemin="0" aria-valuemax="20" aria-valuenow="20"><div class="timer-fill"></div></div>
-        <div class="timer-caption"><span id="timer-status">서두르지 않아도 괜찮아요</span><span>20 sec</span></div>
-        <div class="instructions">
-          <h3>이렇게 즐겨보세요</h3>
-          <ol>
-            <li><span class="step">1</span><span><b>별 모으기 시작</b>을 눌러요</span></li>
-            <li><span class="step">2</span><span>방 안의 <b>빛나는 별</b>을 눌러요</span></li>
-            <li><span class="step">3</span><span>나만의 작은 기록을 만들어봐요</span></li>
-          </ol>
-        </div>
-        <button type="button" id="start"><svg aria-hidden="true"><use href="#icon-star"/></svg><span id="start-label">별 모으기 시작</span></button>
-        <p class="best-score"><svg aria-hidden="true"><use href="#icon-star"/></svg>나의 최고 기록 <strong><span id="best">0</span>개</strong></p>
+        <button type="button" id="hint-button" class="hint-button"><svg aria-hidden="true"><use href="#icon-sparkle"/></svg><span>살짝 힌트</span></button>
+      </footer>
+    </section>
+
+    <section id="ending-screen" class="ending-overlay" role="dialog" aria-modal="true" aria-labelledby="ending-title" tabindex="-1" hidden>
+      <div class="ending-card">
+        <div class="ending-emblem" aria-hidden="true"><svg><use href="#icon-moon"/></svg><span>✦</span></div>
+        <p class="eyebrow">FIVE LITTLE MOMENTS OF HAPPINESS</p>
+        <div class="ending-hearts" aria-label="하트 5개">♥ ♥ ♥ ♥ ♥</div>
+        <h2 id="ending-title">오늘도 포근한 밤이<br>완성됐어요.</h2>
+        <p>차 한 잔, 게임 한 판, 다정한 인사.<br>함께여서 더 따뜻했던 우리의 작은 방.</p>
+        <div class="ending-characters" aria-hidden="true"><img src="assets/girl.webp" alt=""><span>♡</span><img src="assets/boy.webp" alt=""></div>
+        <button type="button" id="replay-button" class="primary-button"><svg aria-hidden="true"><use href="#icon-repeat"/></svg>한 번 더 머무르기</button>
+        <span class="ending-footnote">오늘의 당신에게도, 포근한 밤이길.</span>
       </div>
     </section>
-    <p class="bottom-note"><svg aria-hidden="true"><use href="#icon-heart"/></svg>잘하지 않아도 괜찮아요. 이 순간을 즐겨주세요.</p>
   </main>
-  <footer><span>MADE FOR YOUR LITTLE BREAK</span><span class="footer-stars" aria-hidden="true">✧ · ✦ · ✧</span><span>별빛처럼 포근한 하루를</span></footer>
+  <noscript><div class="noscript-note">이 작은 방을 즐기려면 브라우저에서 JavaScript를 켜주세요.</div></noscript>
 </body>
 </html>
