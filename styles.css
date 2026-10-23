@@ -678,14 +678,6 @@ svg {
   transform-origin:50% 92%
 }
 
-.actor.is-walking img,.actor.is-walking .actor-sprite {
-  animation:walk-bob .28s ease-in-out infinite alternate
-}
-
-.actor.is-facing-left img {
-  scale:-1 1
-}
-
 .actor-shadow {
   position:absolute;
   left:16%;
@@ -1139,15 +1131,6 @@ svg {
   50% {
     opacity:1;
     transform:scale(1.08)
-  }
-}
-
-@keyframes walk-bob {
-  from {
-    transform:translateY(0) rotate(-2deg)
-  }
-  to {
-    transform:translateY(-8px) rotate(2deg)
   }
 }
 
@@ -1950,10 +1933,6 @@ svg {
   animation:destination-pulse 1s ease-out infinite
 }
 
-.actor.is-interacting .actor-sprite {
-  animation:interact-bob .5s ease-in-out 2
-}
-
 .effect-steam,.effect-game,.effect-cat,.effect-mushroom,.effect-stars {
   position:absolute;
   pointer-events:none;
@@ -2011,18 +1990,6 @@ svg {
   pointer-events:none;
   background:radial-gradient(ellipse at 60% 30%,#ffdeb73d,transparent 65%);
   animation:room-warmth 2.5s ease forwards
-}
-
-@keyframes interact-bob {
-  0%,100% {
-    transform:translateY(0) rotate(0)
-  }
-  45% {
-    transform:translateY(-10px) rotate(-3deg)
-  }
-  70% {
-    transform:translateY(-3px) rotate(3deg)
-  }
 }
 
 @keyframes room-warmth {
@@ -2182,5 +2149,175 @@ svg {
   .game-header {
     height: calc(53px + env(safe-area-inset-top, 0px));
     padding-top: calc(4px + env(safe-area-inset-top, 0px));
+  }
+}
+
+/* Pose frames are advanced by the game clock; CSS only supplies small accents. */
+.actor-body {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  transform-origin: 50% 92%;
+  translate: var(--pose-x, 0px) var(--pose-y, 0px);
+}
+
+.actor.is-facing-left .actor-body {
+  scale: -1 1;
+}
+
+.actor-body .actor-sprite,
+.actor-motion {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.actor-motion {
+  display: none;
+  top: auto;
+  bottom: 0;
+  height: var(--frame-height, 228px);
+  background-repeat: no-repeat;
+  background-size: 400% var(--sheet-height, 400%);
+  background-position: var(--frame-x, 0%) var(--frame-y, 0%);
+}
+
+.actor[data-character="boy"] .actor-motion {
+  background-image: url("assets/boy-motions.webp");
+}
+
+.actor[data-character="girl"] .actor-motion {
+  background-image: url("assets/girl-motions.webp");
+}
+
+.actor[data-motion]:not([data-motion="idle"]) .actor-sprite {
+  display: none;
+}
+
+.actor[data-motion]:not([data-motion="idle"]) .actor-motion {
+  display: block;
+}
+
+.actor[data-atlas-ready="false"] .actor-sprite {
+  display: block;
+}
+
+.actor[data-atlas-ready="false"] .actor-motion {
+  display: none;
+}
+
+.actor .actor-shadow {
+  z-index: 0;
+  left: 25%;
+  right: 25%;
+  bottom: 2%;
+  height: 11px;
+  background: #47324b30;
+  filter: blur(4px);
+  transform-origin: center;
+}
+
+.actor[data-motion="walk"] .actor-shadow {
+  animation: footfall-shadow .48s ease-in-out infinite;
+}
+
+.actor[data-motion="sit"] .actor-shadow,
+.actor[data-motion="pet"] .actor-shadow {
+  left: 18%;
+  right: 18%;
+}
+
+.actor-body::after {
+  position: absolute;
+  pointer-events: none;
+  font-size: 28px;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.actor[data-motion="tea"] .actor-body::after {
+  content: "〰";
+  left: 46%;
+  top: 34%;
+  color: #fff9ec;
+  animation: cup-steam 1.8s ease-out infinite;
+}
+
+.actor[data-motion="game"] .actor-body::after {
+  content: "✦";
+  left: 52%;
+  top: 61%;
+  font-size: 15px;
+  color: #ffe6a9;
+  animation: controller-tap .6s steps(2, end) infinite;
+}
+
+.actor[data-motion="pet"] .actor-body::after {
+  content: "♡";
+  left: 76%;
+  top: 58%;
+  color: #ffd4e7;
+  animation: gentle-purr 1.9s ease-out infinite;
+}
+
+.actor[data-motion="light"] .actor-body::after {
+  content: "✧";
+  left: 74%;
+  top: 15%;
+  color: #fff1ba;
+  font-size: 35px;
+  animation: lamp-touch 1.5s ease-in-out infinite;
+}
+
+.actor-prop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The fixed dialogue and character bubble already carry this text. Keep the
+   hands, cup, controller and furniture visible during the actual performance. */
+#scene-world[data-action] .interaction-effect > b {
+  display: none;
+}
+
+@keyframes footfall-shadow {
+  0%, 50%, 100% { opacity: .75; transform: scaleX(1); }
+  25%, 75% { opacity: .5; transform: scaleX(.85); }
+}
+
+@keyframes cup-steam {
+  0% { opacity: 0; transform: translate(0, 4px) scale(.7); }
+  25% { opacity: .8; }
+  100% { opacity: 0; transform: translate(5px, -28px) scale(1.1); }
+}
+
+@keyframes controller-tap {
+  0%, 100% { opacity: .2; transform: scale(.7); }
+  50% { opacity: .9; transform: scale(1); }
+}
+
+@keyframes gentle-purr {
+  0% { opacity: 0; transform: translateY(5px) scale(.8); }
+  20%, 60% { opacity: .85; }
+  100% { opacity: 0; transform: translateY(-25px) scale(1.1); }
+}
+
+@keyframes lamp-touch {
+  0%, 100% { opacity: .45; transform: scale(.8) rotate(-8deg); }
+  50% { opacity: 1; transform: scale(1.15) rotate(8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .actor .actor-shadow,
+  .actor-body::after {
+    animation: none !important;
+    transform: none;
+  }
+  .actor-body::after {
+    opacity: .85;
   }
 }

@@ -11,6 +11,7 @@ from playwright.sync_api import expect, sync_playwright
 
 
 OBJECTS = ('controller', 'tea', 'cat', 'mushroom', 'stars')
+MOTIONS = {'controller': 'game', 'tea': 'tea', 'cat': 'pet', 'mushroom': 'sit', 'stars': 'light'}
 VIEWPORTS = (
     (320, 568),
     (390, 844),
@@ -134,6 +135,53 @@ def check_zoom_and_pan(context, page):
     assert_layout(page)
 
 
+def assert_pose(page, actor_id, motion, animated=False):
+    actor = page.locator(f'#{actor_id}')
+    expect(actor).to_have_attribute('data-motion', motion)
+    expect(actor.locator('.actor-motion')).to_be_visible()
+    assert actor.locator('.actor-motion').evaluate(
+        '(element) => getComputedStyle(element).backgroundImage !== "none"'
+    ), f'{actor_id}: no pose artwork'
+    frame = actor.get_attribute('data-frame')
+    assert frame is not None and 0 <= int(frame) <= 15, (actor_id, frame)
+    if animated:
+        # A pose name alone must not pass when the actual frame never changes.
+        page.wait_for_function("""(expected) => {
+            const actor = document.getElementById(expected.id);
+            return actor.dataset.motion === expected.motion && actor.dataset.frame !== expected.frame;
+        }""", arg={'id': actor_id, 'motion': motion, 'frame': frame}, timeout=1500)
+
+
+def observe_interaction(page, object_id, hearts_before, normal_motion=False):
+    game = page.locator('#game-screen')
+    expect(game).to_have_attribute('data-phase', 'reacting', timeout=12_000)
+    expect(game).to_have_attribute('data-interaction', object_id)
+    expect(filled_hearts(page)).to_have_count(hearts_before)
+    expect(page.locator('#player')).to_have_attribute('data-moving', 'false')
+    expected_motion = MOTIONS[object_id]
+    assert_pose(page, 'player', expected_motion, animated=normal_motion)
+    if object_id in ('controller', 'tea'):
+        expect(page.locator('#partner')).to_have_attribute('data-moving', 'false')
+        assert_pose(page, 'partner', expected_motion, animated=normal_motion)
+        characters = page.locator('#actors .actor').evaluate_all(
+            '(actors) => actors.map(actor => actor.dataset.character).sort()'
+        )
+        assert characters == ['boy', 'girl'], characters
+    else:
+        expect(page.locator('#partner')).to_have_attribute('data-motion', 'idle')
+    if normal_motion and object_id == 'controller':
+        # Repeated activation or another target during a shared action must not
+        # queue a second reward or interrupt one actor while the other continues.
+        page.locator('[data-object="controller"]').press('Enter')
+        page.locator('[data-object="cat"]').press('Enter')
+        expect(game).to_have_attribute('data-phase', 'reacting')
+        expect(game).to_have_attribute('data-interaction', 'controller')
+        expect(page.locator('#player')).to_have_attribute('data-motion', 'game')
+        expect(page.locator('#partner')).to_have_attribute('data-motion', 'game')
+    # Both characters' motions must finish before granting the single reward.
+    expect(filled_hearts(page)).to_have_count(hearts_before)
+
+
 def check_game(context, page, width, height, character, normal_motion):
     choose_character(page, character)
     assert_images_loaded(page)
@@ -152,6 +200,7 @@ def check_game(context, page, width, height, character, normal_motion):
     tap_object(page, 'cat')
     if normal_motion:
         expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
+        assert_pose(page, 'player', 'walk', animated=True)
         expect(filled_hearts(page)).to_have_count(0)
         page.wait_for_function('''(position) => {
             const player = document.querySelector('#player');
@@ -167,10 +216,13 @@ def check_game(context, page, width, height, character, normal_motion):
 
     for index, object_id in enumerate(OBJECTS):
         tap_object(page, object_id)
+        observe_interaction(page, object_id, index, normal_motion)
         expect(filled_hearts(page)).to_have_count(index + 1, timeout=12_000)
         if index < 4:
             wait_ready(page)
             expect(page.locator('#dialogue-text')).not_to_have_text(first_request)
+            expect(page.locator('#player')).to_have_attribute('data-motion', 'idle')
+            expect(page.locator('#partner')).to_have_attribute('data-motion', 'idle')
         else:
             expect(page.locator('#ending-screen')).to_be_visible(timeout=10_000)
             expect(page.locator('#game-screen')).to_have_attribute('data-phase', 'ending')
@@ -192,7 +244,7 @@ def check_game(context, page, width, height, character, normal_motion):
     wait_ready(page)
     page.locator('#change-character').tap()
     expect(page.locator('#character-screen')).to_be_visible()
-    print(f'PASS {width}x{height}: selection, walking, wrong target, hint, zoom/pinch/touch pan, five requests, rotation, ending, replay')
+    print(f'PASS {width}x{height}: walking poses, shared tea/game, pet/sit/light motions, delayed hearts, hint, pinch/pan, rotation, ending, replay')
 
 
 def check_desktop(page):
@@ -202,29 +254,51 @@ def check_desktop(page):
     controller.click()
     expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
     expect(filled_hearts(page)).to_have_count(0)
-    # A new destination must cancel the first walk and its deferred reward.
+    # A new destination cancels the first walk, including its deferred reward.
     page.locator('[data-object="cat"]').click()
     wait_ready(page)
     expect(filled_hearts(page)).to_have_count(0)
+
+    # Restart while the companion is joining the shared activity. Its arrival
+    # must not start an interaction in the next playthrough.
+    controller.click()
+    expect(page.locator('#partner')).to_have_attribute('data-moving', 'true', timeout=10_000)
+    expect(filled_hearts(page)).to_have_count(0)
+    page.locator('#change-character').click()
+    choose_character(page, 'girl', touch=False)
+    page.clock.install()
+    page.clock.fast_forward(30_000)
+    for actor_id in ('player', 'partner'):
+        expect(page.locator(f'#{actor_id}')).to_have_attribute('data-motion', 'idle')
+        expect(page.locator(f'#{actor_id}')).to_have_attribute('data-moving', 'false')
+    expect(filled_hearts(page)).to_have_count(0)
+    wait_ready(page)
+
     controller.focus()
     controller.press('Enter')
+    observe_interaction(page, 'controller', 0)
     expect(filled_hearts(page)).to_have_count(1, timeout=12_000)
     wait_ready(page)
     page.locator('[data-object="tea"]').click()
-    expect(page.locator('#player')).to_have_attribute('data-moving', 'true')
+    observe_interaction(page, 'tea', 1)
+    # Restart after both are already drinking, before either can earn a heart.
     page.locator('#change-character').click()
-    choose_character(page, 'girl', touch=False)
+    choose_character(page, 'boy', touch=False)
     new_request = page.locator('#dialogue-text').inner_text()
-    new_position = page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]')
-    # Advancing beyond the abandoned walk catches callbacks leaking between runs.
-    page.clock.install()
+    new_positions = page.locator('#actors .actor').evaluate_all(
+        '(actors) => actors.map(actor => [actor.offsetLeft, actor.offsetTop])'
+    )
     page.clock.fast_forward(30_000)
     expect(filled_hearts(page)).to_have_count(0)
-    expect(page.locator('#player')).to_have_attribute('data-moving', 'false')
+    for actor_id in ('player', 'partner'):
+        expect(page.locator(f'#{actor_id}')).to_have_attribute('data-motion', 'idle')
+        expect(page.locator(f'#{actor_id}')).to_have_attribute('data-moving', 'false')
     expect(page.locator('#dialogue-text')).to_have_text(new_request)
-    assert page.locator('#player').evaluate('(element) => [element.offsetLeft, element.offsetTop]') == new_position
+    assert page.locator('#actors .actor').evaluate_all(
+        '(actors) => actors.map(actor => [actor.offsetLeft, actor.offsetTop])'
+    ) == new_positions
     wait_ready(page)
-    print('PASS 1280x900 desktop: mouse movement, redirected walk cancellation, keyboard interaction, restart during movement')
+    print('PASS 1280x900 desktop: mouse redirect, companion staging cancellation, keyboard interaction, restart during shared motion')
 
 
 def check_site(directory):

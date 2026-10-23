@@ -88,13 +88,37 @@
     sound: false,
     run: 0,
     movement: 0,
-    frame: 0,
     timer: 0,
     hintTimer: 0,
+    action: 0,
   };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   let player, partner, audio, resizeFrame;
+  const moves = new Map();
+  const poses = new Map();
+  let poseFrame = 0;
+  const motionFrames = {
+    walk: { frames: [0, 1, 2, 3], interval: 140 },
+    tea: { frames: [4, 4, 5, 5, 5, 4], interval: 300 },
+    game: { frames: [6, 7], interval: 250 },
+    pet: { frames: [8, 9], interval: 440 },
+    sit: { frames: [10, 11], interval: 580 },
+    light: { frames: [12, 13], interval: 500 },
+  };
+  const atlases = new Map(
+    ["boy", "girl"].map((character) => {
+      const image = new Image();
+      image.src = `assets/${character}-motions.webp`;
+      return [
+        character,
+        image
+          .decode()
+          .then(() => true)
+          .catch(() => false),
+      ];
+    }),
+  );
   // Walkable floor and furniture footprints use the same coordinates as the room.
   const floor = [
     [205, 815],
@@ -147,8 +171,8 @@
     }
     return best;
   }
-  function pathTo(x, y) {
-    const start = nearest(state),
+  function pathTo(x, y, from = state) {
+    const start = nearest(from),
       goal = nearest({ x, y }),
       open = new Set([start.key]),
       previous = new Map();
@@ -210,8 +234,17 @@
     player.style.left = `${state.x}px`;
     player.style.top = `${state.y}px`;
     player.style.zIndex = Math.round(state.y);
-    $("#speech-bubble").style.left = `${clamp(state.x, 170, 790)}px`;
-    $("#speech-bubble").style.top = `${state.y - 195}px`;
+    const poseX = parseFloat(player.style.getPropertyValue("--pose-x")) || 0;
+    const poseY = parseFloat(player.style.getPropertyValue("--pose-y")) || 0;
+    const height =
+      player.dataset.motion === "idle"
+        ? 228
+        : Math.max(
+            228,
+            parseFloat(player.style.getPropertyValue("--frame-height")) || 228,
+          );
+    $("#speech-bubble").style.left = `${clamp(state.x + poseX, 170, 790)}px`;
+    $("#speech-bubble").style.top = `${state.y + poseY - height - 16}px`;
   }
   function renderHearts() {
     $("#hearts").replaceChildren(
@@ -235,6 +268,8 @@
     el.className = "actor";
     el.dataset.character = character;
     el.dataset.moving = "false";
+    el.dataset.motion = "idle";
+    el.dataset.atlasReady = "false";
     el.style.left = `${x}px`;
     el.style.top = `${y}px`;
     el.style.zIndex = Math.round(y);
@@ -244,8 +279,121 @@
     img.alt = "";
     img.className = "actor-sprite";
     img.draggable = false;
-    el.append(img);
+    const shadow = document.createElement("span");
+    shadow.className = "actor-shadow";
+    const body = document.createElement("div");
+    body.className = "actor-body";
+    const motion = document.createElement("div");
+    motion.className = "actor-motion";
+    body.append(img, motion);
+    el.append(shadow, body);
+    atlases.get(character).then((ready) => {
+      el.dataset.atlasReady = String(ready);
+    });
     return el;
+  }
+  function position(el) {
+    return { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
+  }
+  function place(el, x, y) {
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.zIndex = Math.round(y);
+    if (el === player) {
+      state.x = x;
+      state.y = y;
+      paintPlayer();
+    }
+  }
+  function setPoseFrame(el, frame) {
+    const row = Math.floor(frame / 4),
+      boundaries = [0, 400, 744, 1100, 1536];
+    const top = boundaries[row],
+      height = boundaries[row + 1] - top;
+    el.dataset.frame = String(frame);
+    el.style.setProperty("--frame-x", `${((frame % 4) / 3) * 100}%`);
+    el.style.setProperty("--frame-y", `${(top / (1536 - height)) * 100}%`);
+    el.style.setProperty("--sheet-height", `${(1536 / height) * 100}%`);
+    el.style.setProperty("--frame-height", `${(152 * height) / 256}px`);
+    if (el === player) paintPlayer();
+  }
+  function animatePoses(now) {
+    poseFrame = 0;
+    for (const [el, pose] of poses) {
+      const spec = motionFrames[pose.name];
+      const index = reduced.matches
+        ? 0
+        : Math.floor((now - pose.start) / spec.interval) % spec.frames.length;
+      setPoseFrame(el, spec.frames[index]);
+    }
+    if (poses.size && !reduced.matches)
+      poseFrame = requestAnimationFrame(animatePoses);
+  }
+  function setMotion(el, name, start = performance.now()) {
+    el.dataset.motion = name;
+    el.classList.toggle("is-walking", name === "walk");
+    el.dataset.moving = String(name === "walk");
+    if (name === "idle") {
+      poses.delete(el);
+      delete el.dataset.frame;
+      el.style.removeProperty("--pose-x");
+      el.style.removeProperty("--pose-y");
+      if (el === player) paintPlayer();
+    } else {
+      poses.set(el, { name, start });
+      setPoseFrame(el, motionFrames[name].frames[0]);
+      if (!poseFrame && !reduced.matches)
+        poseFrame = requestAnimationFrame(animatePoses);
+    }
+  }
+  function cancelMove(el) {
+    const move = moves.get(el);
+    if (!move) return;
+    cancelAnimationFrame(move.frame);
+    moves.delete(el);
+    setMotion(el, "idle");
+    move.resolve(false);
+  }
+  function moveActor(el, x, y) {
+    cancelMove(el);
+    const origin = position(el);
+    const path = [origin, ...pathTo(x, y, origin)];
+    const lengths = path.slice(1).map((point, i) => dist(path[i], point));
+    const total = lengths.reduce((a, b) => a + b, 0);
+    if (total < 1) return Promise.resolve(true);
+    const duration = reduced.matches
+      ? clamp(total, 180, 500)
+      : clamp(total / 0.27, 450, 3200);
+    setMotion(el, "walk");
+    return new Promise((resolve) => {
+      const move = { frame: 0, resolve };
+      moves.set(el, move);
+      let started;
+      function tick(now) {
+        if (moves.get(el) !== move) return;
+        started ??= now;
+        const progress = Math.min(1, (now - started) / duration);
+        let travelled = progress * total,
+          index = 0;
+        while (index < lengths.length - 1 && travelled > lengths[index])
+          travelled -= lengths[index++];
+        const a = path[index],
+          b = path[index + 1] || a;
+        const fraction = lengths[index] ? travelled / lengths[index] : 1;
+        // The boy atlas faces left; the girl atlas faces right.
+        const facesLeft = el.dataset.character === "boy";
+        if (b.x !== a.x)
+          el.classList.toggle("is-facing-left", b.x < a.x !== facesLeft);
+        place(el, a.x + (b.x - a.x) * fraction, a.y + (b.y - a.y) * fraction);
+        if (progress < 1) move.frame = requestAnimationFrame(tick);
+        else {
+          moves.delete(el);
+          setMotion(el, "idle");
+          resolve(true);
+        }
+      }
+      move.frame = requestAnimationFrame(tick);
+    });
   }
   function hideHint() {
     clearTimeout(state.hintTimer);
@@ -255,7 +403,13 @@
   function clearRun() {
     state.run++;
     state.movement++;
-    cancelAnimationFrame(state.frame);
+    state.action++;
+    for (const el of [...moves.keys()]) cancelMove(el);
+    for (const el of [...poses.keys()]) setMotion(el, "idle");
+    cancelAnimationFrame(poseFrame);
+    poseFrame = 0;
+    delete screen.dataset.interaction;
+    delete world.dataset.action;
     clearTimeout(state.timer);
     hideHint();
     $("#effects")
@@ -386,12 +540,102 @@
     speak("오늘도 포근한 밤이 완성됐어요.", "함께라서 더 포근한 밤 ♡");
     effect({ x: state.x, y: state.y - 180, effect: "cat", bubble: "♡" }, true);
     effect(
-      { x: parseFloat(partner.style.left), y: 810, effect: "cat", bubble: "♡" },
+      {
+        x: position(partner).x,
+        y: position(partner).y - 180,
+        effect: "cat",
+        bubble: "♡",
+      },
       true,
     );
     $("#ending-screen").hidden = false;
     screen.inert = true;
     $("#replay-button").focus({ preventScroll: true });
+  }
+  function face(el, x) {
+    const wantsLeft = x < position(el).x;
+    el.classList.toggle(
+      "is-facing-left",
+      wantsLeft !== (el.dataset.character === "boy"),
+    );
+  }
+  async function performInteraction(object) {
+    const run = state.run,
+      action = ++state.action;
+    const shared = object.id === "tea" || object.id === "controller";
+    const valid = () => run === state.run && action === state.action;
+    hideHint();
+    screen.dataset.interaction = object.id;
+    phase("staging");
+    $("#hint-button").disabled = true;
+    if (shared) {
+      speak(
+        object.id === "tea"
+          ? "우리 같이 앉아서 한 잔 마시자."
+          : "컨트롤러 찾았다! 같이 TV 앞에 앉을까?",
+      );
+      const seats =
+        object.id === "tea"
+          ? { girl: [365, 990], boy: [590, 990] }
+          : { girl: [440, 825], boy: [600, 845] };
+      const arrivedTogether = await Promise.all(
+        [player, partner].map((el) =>
+          moveActor(el, ...seats[el.dataset.character]),
+        ),
+      );
+      if (!valid() || arrivedTogether.some((arrived) => !arrived)) return;
+    }
+    if (!valid()) return;
+    phase("reacting");
+    world.dataset.action = object.id;
+    const motion = {
+      controller: "game",
+      tea: "tea",
+      cat: "pet",
+      mushroom: "sit",
+      stars: "light",
+    }[object.id];
+    const started = performance.now();
+    const participants = shared ? [player, partner] : [player];
+    for (const el of participants) {
+      face(
+        el,
+        object.id === "tea" ? 485 : object.id === "controller" ? 555 : object.x,
+      );
+      setMotion(el, motion, started);
+    }
+    if (object.id === "mushroom") {
+      // The character's feet remain on the walkable floor; the seated pose is
+      // placed over the cap of the actual mushroom in the background.
+      player.style.setProperty("--pose-x", `${object.x - state.x}px`);
+      player.style.setProperty("--pose-y", "-38px");
+      paintPlayer();
+    }
+    speak(object.reply, object.bubble);
+    effect(object);
+    const focus = shared
+      ? {
+          x: (position(player).x + position(partner).x) / 2,
+          y: (position(player).y + position(partner).y) / 2 - 100,
+        }
+      : { x: (object.x + state.x) / 2, y: (object.y + state.y - 110) / 2 };
+    reveal(focus);
+    const duration = reduced.matches ? 900 : shared ? 3400 : 2600;
+    state.timer = setTimeout(() => {
+      if (!valid()) return;
+      for (const el of participants) setMotion(el, "idle");
+      delete screen.dataset.interaction;
+      delete world.dataset.action;
+      state.quest++;
+      $(`[data-object="${object.id}"]`).classList.add("is-found");
+      renderHearts();
+      $("#hint-button").disabled = false;
+      if (state.quest === objects.length) finish();
+      else {
+        phase("playing");
+        speak(objects[state.quest].clue);
+      }
+    }, duration);
   }
   function arrived(object) {
     if (!object) {
@@ -399,86 +643,37 @@
       speak(objects[state.quest].clue);
       return;
     }
-    const expected = objects[state.quest];
-    if (object !== expected) {
+    if (object !== objects[state.quest]) {
       phase("playing");
       speak(
         state.quest > objects.indexOf(object)
           ? "여긴 아까 함께했지. 다음 작은 부탁도 들어줄래?"
           : "여기도 포근하네. 지금 부탁은 다른 곳에 있는 것 같아.",
-        expected.clue,
+        objects[state.quest].clue,
       );
       return;
     }
-    phase("reacting");
-    hideHint();
-    state.quest++;
-    $(`[data-object="${object.id}"]`).classList.add("is-found");
-    player.classList.add("is-interacting");
-    renderHearts();
-    speak(object.reply, object.bubble);
-    effect(object);
-    const run = state.run;
-    state.timer = setTimeout(
-      () => {
-        if (run !== state.run) return;
-        player.classList.remove("is-interacting");
-        if (state.quest === objects.length) finish();
-        else {
-          phase("playing");
-          speak(objects[state.quest].clue);
-        }
-      },
-      reduced.matches ? 600 : 1300,
-    );
+    void performInteraction(object);
   }
-  function walk(x, y, object = null) {
+  async function walk(x, y, object = null) {
     if (!["playing", "walking"].includes(state.phase)) return;
-    const path = [{ x: state.x, y: state.y }, ...pathTo(x, y)],
-      lengths = path.slice(1).map((p, i) => dist(path[i], p)),
-      total = lengths.reduce((a, b) => a + b, 0);
-    const duration = reduced.matches
-      ? clamp(total, 180, 500)
-      : clamp(total / 0.27, 450, 3200);
-    cancelAnimationFrame(state.frame);
-    const movement = ++state.movement;
+    const movement = ++state.movement,
+      run = state.run;
     phase("walking");
-    player.classList.add("is-walking");
-    player.dataset.moving = "true";
     $("#speech-bubble").hidden = true;
     $("#effects")
       .querySelectorAll(".destination-ring")
       .forEach((el) => el.remove());
+    const destination = nearest({ x, y });
     const marker = document.createElement("span");
     marker.className = "destination-ring";
-    marker.style.left = `${path.at(-1).x}px`;
-    marker.style.top = `${path.at(-1).y}px`;
+    marker.style.left = `${destination.x}px`;
+    marker.style.top = `${destination.y}px`;
     $("#effects").append(marker);
-    let started;
-    function tick(now) {
-      if (movement !== state.movement) return;
-      started ??= now;
-      const progress = Math.min(1, (now - started) / duration);
-      let travelled = progress * total,
-        index = 0;
-      while (index < lengths.length - 1 && travelled > lengths[index])
-        travelled -= lengths[index++];
-      const a = path[index],
-        b = path[index + 1] || a,
-        part = lengths[index] ? travelled / lengths[index] : 1;
-      player.classList.toggle("is-facing-left", b.x < a.x);
-      state.x = a.x + (b.x - a.x) * part;
-      state.y = a.y + (b.y - a.y) * part;
-      paintPlayer();
-      if (progress < 1) state.frame = requestAnimationFrame(tick);
-      else {
-        marker.remove();
-        player.classList.remove("is-walking");
-        player.dataset.moving = "false";
-        arrived(object);
-      }
-    }
-    state.frame = requestAnimationFrame(tick);
+    const completed = await moveActor(player, x, y);
+    marker.remove();
+    if (completed && run === state.run && movement === state.movement)
+      arrived(object);
   }
   function baseScale() {
     return Math.min(
