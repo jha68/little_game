@@ -1,0 +1,2 @@
+# Browser tests only; the game itself has no package dependencies.
+playwright==1.62.0

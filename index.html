@@ -3,86 +3,75 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Little Game — 별 잡기</title>
-  <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    * { box-sizing: border-box; }
-    body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #101628; color: #f4f6ff; }
-    main { width: min(92vw, 560px); text-align: center; }
-    h1 { margin-bottom: .25rem; }
-    p { color: #b8c2db; }
-    .stats { display: flex; justify-content: space-around; margin: 1.25rem 0; font-size: 1.2rem; }
-    #field { position: relative; height: 340px; overflow: hidden; border: 2px solid #45557d; border-radius: 18px; background: radial-gradient(circle at top, #263758, #17213b); }
-    #star { position: absolute; display: none; width: 56px; height: 56px; border: 0; border-radius: 50%; background: #ffcf5a; color: #2b230d; font-size: 29px; cursor: pointer; box-shadow: 0 0 25px #ffcf5a66; touch-action: manipulation; }
-    #start { margin-top: 18px; padding: 12px 26px; border: 0; border-radius: 12px; background: #85b6ff; color: #101628; font-size: 1rem; font-weight: 700; cursor: pointer; }
-    #message { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; font-size: 1.2rem; pointer-events: none; }
-    button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
-  </style>
+  <meta name="theme-color" content="#f7f3f8">
+  <meta name="description" content="보라빛 작은 방에서 보내는 20초의 휴식. 반짝이는 별을 모아보세요.">
+  <title>별이 머무는 방 — Little Game</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%239270a9'/%3E%3Cpath d='m32 10 6 15 16 1-12 11 4 16-14-9-14 9 4-16-12-11 16-1Z' fill='%23ffe5ac'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="game.js" defer></script>
 </head>
 <body>
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute"><defs>
+    <symbol id="icon-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-moon" viewBox="0 0 24 24"><path d="M20 14.4A8.6 8.6 0 0 1 9.6 4a8.5 8.5 0 1 0 10.8 10.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="icon-heart" viewBox="0 0 24 24"><path d="M12 20 4 12C-2 5 7 0 12 7c5-7 14-2 8 5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+  </defs></svg>
+  <header class="site-header">
+    <div class="brand"><svg class="brand-icon" aria-hidden="true"><use href="#icon-star"/></svg><span>LITTLE GAME</span></div>
+    <div class="header-note">당신을 위한 작은 쉼표</div>
+  </header>
   <main>
-    <h1>⭐ 별 잡기</h1>
-    <p>20초 동안 나타나는 별을 최대한 많이 눌러보세요!</p>
-    <div class="stats">
-      <span>점수: <strong id="score">0</strong></span>
-      <span>남은 시간: <strong id="time">20</strong>초</span>
-    </div>
-    <div id="field">
-      <button id="star" aria-label="별 잡기">★</button>
-      <div id="message">시작 버튼을 눌러주세요</div>
-    </div>
-    <button id="start">게임 시작</button>
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">A COZY ROOM, A LITTLE MAGIC</p>
+      <h1 id="page-title">별이 머무는 <span>방</span></h1>
+      <p>오늘도 수고했어요. 잠깐, 반짝이는 순간을 모아볼까요?</p>
+    </section>
+    <section class="game-shell" aria-label="20초 별 잡기 게임">
+      <div class="room-panel" data-state="idle">
+        <div class="room-top">
+          <span class="room-label"><svg aria-hidden="true"><use href="#icon-moon"/></svg>MY LITTLE ROOM</span>
+          <button type="button" class="sound-button" id="sound" aria-label="효과음 켜기" aria-pressed="false" title="효과음 켜기">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Z" stroke-linejoin="round"/><path class="sound-off" d="m16 9 6 6m0-6-6 6"/><path class="sound-on" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div id="field" aria-label="별이 나타나는 아늑한 보라색 방">
+          <img class="room-art" src="assets/room.svg" alt="보라색 커튼과 소파, 따뜻한 조명, 찻잔과 잠든 고양이가 있는 작은 방" draggable="false">
+          <span class="ambient-star one" aria-hidden="true">✦</span><span class="ambient-star two" aria-hidden="true">✧</span><span class="ambient-star three" aria-hidden="true">✦</span>
+          <button type="button" id="star" aria-label="별 잡기">
+            <svg viewBox="0 0 60 60" aria-hidden="true"><path d="M30 5 38 20 55 23 43 35 45 53 30 45 14 53 17 35 5 23 22 20Z" fill="#ffe39a" stroke="#fff4cb" stroke-width="2.5" stroke-linejoin="round"/><path d="m30 10 6 13 14 2" stroke="#fff5cd" stroke-width="2" stroke-linecap="round"/><path d="M24 30v3m12-3v3" stroke="#a47b6d" stroke-width="2.5" stroke-linecap="round"/><path d="M27 37q3 3 6 0" stroke="#a47b6d" stroke-width="1.6" stroke-linecap="round" fill="none"/><ellipse cx="20" cy="36" rx="3" ry="1.5" fill="#edb1a5"/><ellipse cx="40" cy="36" rx="3" ry="1.5" fill="#edb1a5"/></svg>
+          </button>
+          <div id="message" class="message" role="status" aria-live="polite" aria-atomic="true">
+            <strong><span class="message-icon" aria-hidden="true">✧</span><span id="message-title">작은 별들이 당신을 기다려요</span></strong>
+            <p id="message-detail">준비되면 아래의 시작 버튼을 눌러주세요</p>
+          </div>
+          <p class="room-caption" aria-hidden="true">a little place to slow down & shine</p>
+        </div>
+      </div>
+      <div class="game-panel">
+        <p class="panel-heading"><svg aria-hidden="true"><use href="#icon-star"/></svg>COLLECT LITTLE STARS</p>
+        <h2>오늘의 별 모으기</h2>
+        <p class="panel-description">포근한 방에 찾아온 작은 별들.<br>20초 동안 하나씩 모아주세요.</p>
+        <div class="stats">
+          <div class="stat"><span class="stat-label"><svg aria-hidden="true"><use href="#icon-star"/></svg>모은 별</span><div class="stat-value"><strong id="score">0</strong><span>개</span></div></div>
+          <div class="stat"><span class="stat-label"><svg aria-hidden="true"><use href="#icon-clock"/></svg>남은 시간</span><div class="stat-value"><strong id="time">20</strong><span>초</span></div></div>
+        </div>
+        <div class="timer-track" role="progressbar" aria-label="남은 시간" aria-valuemin="0" aria-valuemax="20" aria-valuenow="20"><div class="timer-fill"></div></div>
+        <div class="timer-caption"><span id="timer-status">서두르지 않아도 괜찮아요</span><span>20 sec</span></div>
+        <div class="instructions">
+          <h3>이렇게 즐겨보세요</h3>
+          <ol>
+            <li><span class="step">1</span><span><b>별 모으기 시작</b>을 눌러요</span></li>
+            <li><span class="step">2</span><span>방 안의 <b>빛나는 별</b>을 눌러요</span></li>
+            <li><span class="step">3</span><span>나만의 작은 기록을 만들어봐요</span></li>
+          </ol>
+        </div>
+        <button type="button" id="start"><svg aria-hidden="true"><use href="#icon-star"/></svg><span id="start-label">별 모으기 시작</span></button>
+        <p class="best-score"><svg aria-hidden="true"><use href="#icon-star"/></svg>나의 최고 기록 <strong><span id="best">0</span>개</strong></p>
+      </div>
+    </section>
+    <p class="bottom-note"><svg aria-hidden="true"><use href="#icon-heart"/></svg>잘하지 않아도 괜찮아요. 이 순간을 즐겨주세요.</p>
   </main>
-  <script>
-    const field = document.querySelector('#field');
-    const star = document.querySelector('#star');
-    const message = document.querySelector('#message');
-    const start = document.querySelector('#start');
-    const scoreLabel = document.querySelector('#score');
-    const timeLabel = document.querySelector('#time');
-    let score = 0;
-    let time = 20;
-    let timer = null;
-
-    function moveStar() {
-      const x = Math.random() * Math.max(0, field.clientWidth - star.offsetWidth);
-      const y = Math.random() * Math.max(0, field.clientHeight - star.offsetHeight);
-      star.style.left = x + 'px';
-      star.style.top = y + 'px';
-    }
-
-    function finish() {
-      clearInterval(timer);
-      timer = null;
-      star.style.display = 'none';
-      message.textContent = '게임 종료! 최종 점수: ' + score;
-      message.style.display = 'grid';
-      start.textContent = '다시 하기';
-      start.disabled = false;
-    }
-
-    start.addEventListener('click', () => {
-      if (timer) return;
-      score = 0;
-      time = 20;
-      scoreLabel.textContent = score;
-      timeLabel.textContent = time;
-      message.style.display = 'none';
-      star.style.display = 'block';
-      start.disabled = true;
-      moveStar();
-      timer = setInterval(() => {
-        time -= 1;
-        timeLabel.textContent = time;
-        if (time <= 0) finish();
-      }, 1000);
-    });
-
-    star.addEventListener('click', () => {
-      if (!timer) return;
-      scoreLabel.textContent = ++score;
-      moveStar();
-    });
-  </script>
+  <footer><span>MADE FOR YOUR LITTLE BREAK</span><span class="footer-stars" aria-hidden="true">✧ · ✦ · ✧</span><span>별빛처럼 포근한 하루를</span></footer>
 </body>
 </html>
